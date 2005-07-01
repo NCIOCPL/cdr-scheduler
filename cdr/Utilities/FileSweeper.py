@@ -1,12 +1,15 @@
 #----------------------------------------------------------------------
 #
-# $Id: FileSweeper.py,v 1.1 2005-07-01 02:31:55 ameyer Exp $
+# $Id: FileSweeper.py,v 1.2 2005-07-01 03:20:28 ameyer Exp $
 #
 # Sweep up obsolete directories and files based on instructions in
 # a configuration file - deleting, truncating, or archiving files
 # and directories when required.
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.1  2005/07/01 02:31:55  ameyer
+# Cleanup program for old log and output files.
+#
 #
 #----------------------------------------------------------------------
 import sys, os, os.path, getopt, glob, shutil, time
@@ -459,7 +462,7 @@ SweepSpec: "%s"
                 # But don't truncate if in test mode
                 if not testMode:
                     try:
-                        srcp = open(inFile, "ab")
+                        srcp = open(inFile, "ab+")
                         srcp.truncate(truncPoint)
                         srcp.close()
                     except Exception, info:
@@ -469,7 +472,7 @@ SweepSpec: "%s"
 
                 # Archive the truncation
                 try:
-                    tar.add(tmpFile);
+                    tar.add(inFile);
                 except Exception, info:
                     self.addMsg("Tar error: %s" % info)
                     self.addMsg("Abandoning this SweepSpec")
