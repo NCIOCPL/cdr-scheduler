@@ -1,12 +1,15 @@
 #----------------------------------------------------------------------
 #
-# $Id: FileSweeper.py,v 1.2 2005-07-01 03:20:28 ameyer Exp $
+# $Id: FileSweeper.py,v 1.3 2005-07-15 02:09:07 ameyer Exp $
 #
 # Sweep up obsolete directories and files based on instructions in
 # a configuration file - deleting, truncating, or archiving files
 # and directories when required.
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.2  2005/07/01 03:20:28  ameyer
+# Bug fix.
+#
 # Revision 1.1  2005/07/01 02:31:55  ameyer
 # Cleanup program for old log and output files.
 #
@@ -863,20 +866,23 @@ remove the file "%s" to enable FileSweeper to run.
             # Were there any?
             if len(spec.qualifiedList) > 0:
 
-                # Combine command line path with stored output path
-                spec.makeOutFileName(outputDir)
+                # If we're archiving files, process output filename
+                if spec.outFile and spec.outFile.find("Delete") == -1:
 
-                # Create the directory path if necessary
-                # Already created outputDir, but we may need more
-                (fileBase, fileName) = os.path.split(spec.outFile)
-                if not os.path.exists(fileBase):
-                    try:
-                        os.makedirs(fileBase)
-                    except Exception, info:
-                        fatalError('Error creating directory "%s": %s' \
-                                    % (fileBase, info))
-                if not os.path.isdir(fileBase):
-                    fatalError('Config output name "%s" is not a directory')
+                    # Combine command line path with stored output path
+                    spec.makeOutFileName(outputDir)
+
+                    # Create the directory path if necessary
+                    # Already created outputDir, but we may need more
+                    (fileBase, fileName) = os.path.split(spec.outFile)
+                    if not os.path.exists(fileBase):
+                        try:
+                            os.makedirs(fileBase)
+                        except Exception, info:
+                            fatalError('Error creating directory "%s": %s' \
+                                        % (fileBase, info))
+                    if not os.path.isdir(fileBase):
+                        fatalError('Config output name "%s" is not a directory')
 
                 # Perform action
                 if spec.action == "Archive":
