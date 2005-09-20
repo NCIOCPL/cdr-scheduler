@@ -1,12 +1,16 @@
 #----------------------------------------------------------------------
 #
-# $Id: FileSweeper.py,v 1.3 2005-07-15 02:09:07 ameyer Exp $
+# $Id: FileSweeper.py,v 1.4 2005-09-20 18:16:02 ameyer Exp $
 #
 # Sweep up obsolete directories and files based on instructions in
 # a configuration file - deleting, truncating, or archiving files
 # and directories when required.
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.3  2005/07/15 02:09:07  ameyer
+# Eliminated requirement to specify and OutputFile name if we are not
+# actually going to output any files.
+#
 # Revision 1.2  2005/07/01 03:20:28  ameyer
 # Bug fix.
 #
@@ -84,10 +88,10 @@ class SweepSpec:
 
         # These fields track what actually matches the specification
         # Initialized to invalid values, filled in by self.statFiles()
-        self.oldestDate    = -1     # Date of oldest file found in root/inFiles
-        self.youngestDate  = -1     # Date of youngest found
-        self.biggestSize   = -1     # Size of biggest file found
-        self.smallestSize  = -1     # Size of smallest
+        self.oldestDate    = 0      # Date of oldest file found in root/inFiles
+        self.youngestDate  = 0      # Date of youngest found
+        self.biggestSize   = 0      # Size of biggest file found
+        self.smallestSize  = 0      # Size of smallest
         self.totalList     = []     # All names of files found in root/inFiles
         self.qualifiedList = []     # qualFile objects qualified for action
         self.totalBytes    = 0      # Total bytes in all files
@@ -205,6 +209,10 @@ class SweepSpec:
         for fileSpec in self.inFiles:
             self.totalList.extend(glob.glob((fileSpec)))
 
+        # Were there any files found at all?
+        if len(self.totalList) == 0:
+            return False
+
         # Stat each one
         for fileName in self.totalList:
 
@@ -227,15 +235,15 @@ class SweepSpec:
 
                 # Update summary dates for SweepSpec
                 # XXX Should I erase these if required criterion not met?
-                if self.oldestDate == -1 or mtime < self.oldestDate:
+                if self.oldestDate == 0 or mtime < self.oldestDate:
                     self.oldestDate = mtime
                 if mtime > self.youngestDate:
                     self.youngestDate = mtime
 
                 # Summary of sizes
-                if self.smallestSize == -1 or fsize < self.smallestSize:
+                if self.smallestSize == 0 or fsize < self.smallestSize:
                     self.smallestSize = fsize
-                if self.biggestSize == -1 or fsize > self.biggestSize:
+                if self.biggestSize == 0 or fsize > self.biggestSize:
                     self.biggestSize = fsize
 
                 # And cumulate number of bytes we'll remove
@@ -250,7 +258,7 @@ class SweepSpec:
         # Was at least one required criterion met?
         if self.oldSpec and self.oldestDate > self.oldSpec:
             return False
-        elif self.maxSizeSpec > self.biggestSize:
+        elif self.maxSizeSpec and self.maxSizeSpec > self.biggestSize:
             return False
 
         # We should take action on this spec
@@ -861,10 +869,7 @@ remove the file "%s" to enable FileSweeper to run.
                 continue
 
             # Find files to process
-            spec.statFiles()
-
-            # Were there any?
-            if len(spec.qualifiedList) > 0:
+            if spec.statFiles():
 
                 # If we're archiving files, process output filename
                 if spec.outFile and spec.outFile.find("Delete") == -1:
