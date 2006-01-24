@@ -1,12 +1,18 @@
 #----------------------------------------------------------------------
 #
-# $Id: FileSweeper.py,v 1.4 2005-09-20 18:16:02 ameyer Exp $
+# $Id: FileSweeper.py,v 1.5 2006-01-24 23:57:34 ameyer Exp $
 #
 # Sweep up obsolete directories and files based on instructions in
 # a configuration file - deleting, truncating, or archiving files
 # and directories when required.
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.4  2005/09/20 18:16:02  ameyer
+# Fixed bug causing files to be truncated even if none exceeded the
+# size threshold.
+# Made some other small cleanups the need for which was revealed by the
+# bug fix.
+#
 # Revision 1.3  2005/07/15 02:09:07  ameyer
 # Eliminated requirement to specify and OutputFile name if we are not
 # actually going to output any files.
@@ -461,10 +467,14 @@ SweepSpec: "%s"
    Truncation was aborted""" % (self.specName, inFile, info))
                 continue
 
-            # Sanity check
+            # Sanity debug checks
             if not os.path.exists(tmpFile):
                 fatalError('Temporary file "%s" not found - internal error' \
                             % tmpFile)
+            tmpstat = os.stat(tmpFile)
+            if tmpstat.st_size != self.truncSizeSpec:
+                fatalError('Temporary file "%s" size=%d, but truncsize=%d' %\
+                           (tmpFile, tmpstat.st_size, self.truncSizeSpec))
 
             # If archiving, truncate and save the uncopied part
             #   of the temporary file
@@ -480,6 +490,17 @@ SweepSpec: "%s"
                         self.addMsg('Unable to truncate "%s::%s": %s' % \
                                      (self.specName, inFile, info))
                         continue
+
+                    # Sanity debug checks
+                    fstat = os.stat(inFile)
+                    if fstat.st_size != truncPoint:
+                        fatalError(\
+                         'Truncation file "%s" size=%d, truncsize=%d' %\
+                         (inFile, fstat.st_size, self.truncSizeSpec))
+                    if (tmpstat.st_size + fstat.st_size) != fileObj.fsize:
+                        fatalError(\
+      'File "%s": Truncated and remaining sizes %d + %d != original size %d' %\
+                       (inFile, tmpstat.st_size, fstat.st_size, fileObj.fsize))
 
                 # Archive the truncation
                 try:
