@@ -1,12 +1,16 @@
 #----------------------------------------------------------------------
 #
-# $Id: FileSweeper.py,v 1.5 2006-01-24 23:57:34 ameyer Exp $
+# $Id: FileSweeper.py,v 1.6 2008-04-08 23:17:51 ameyer Exp $
 #
 # Sweep up obsolete directories and files based on instructions in
 # a configuration file - deleting, truncating, or archiving files
 # and directories when required.
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.5  2006/01/24 23:57:34  ameyer
+# Added some debugging checks to TruncateArchive to assure that file sizes
+# after processing are as expected.
+#
 # Revision 1.4  2005/09/20 18:16:02  ameyer
 # Fixed bug causing files to be truncated even if none exceeded the
 # size threshold.
@@ -168,6 +172,10 @@ class SweepSpec:
                        self.specName);
 
         # Validate combinations of specs
+        if not self.outFile and self.action in ('Archive','TruncateArchive'):
+            fatalError(
+             "No output file specified for SweepSpec %s with Action=%s" % \
+                (self.specName, self.action))
         if not (self.oldSpec and self.youngSpec):
             if self.action == 'Archive':
                 fatalError(\
@@ -473,8 +481,10 @@ SweepSpec: "%s"
                             % tmpFile)
             tmpstat = os.stat(tmpFile)
             if tmpstat.st_size != self.truncSizeSpec:
-                fatalError('Temporary file "%s" size=%d, but truncsize=%d' %\
-                           (tmpFile, tmpstat.st_size, self.truncSizeSpec))
+                self.addMsg(
+                  'WARNING: Temp file "%s" size=%d, but truncsize=%d\n' \
+                           (tmpFile, tmpstat.st_size, self.truncSizeSpec) +
+                  '     Input file may have changed during processing')
 
             # If archiving, truncate and save the uncopied part
             #   of the temporary file
@@ -568,7 +578,7 @@ SweepSpec: "%s"
     #----------------------------------------------------------------------
     # Create a full output file name
     #----------------------------------------------------------------------
-    def makeOutFileName(self, outPath):
+    def makeOutFileName(self, outPath, testMode):
         """
         Create an absolute path name for an output file in zip or
         tar format.
@@ -609,19 +619,25 @@ SweepSpec: "%s"
         else:
             outFile += time.strftime(".%Y%m%d", time.localtime())
 
+        # If running in test mode, indicate that in the output filename
+        # Allows us to easily find and delete such files
+        if testMode:
+            outFile += ".TEST"
+
         # Add conventional .tar.bz2 suffix
         outFile += ".tar.bz2"
 
         # Normalize slashes.  Cygwin tar likes forward slashes
-        outFile = normPath(outFile)
+        outBase = normPath(outFile)
 
         # Make sure we don't overwrite existing archive
-        outFile = makeFileNameUnique(outFile, MAX_OUTPUT_FILES_WITH_ONE_NAME)
+        outFile = makeFileNameUnique(outBase, MAX_OUTPUT_FILES_WITH_ONE_NAME)
 
         # Sanity check
         if not outFile:
-            fatalError("Too many output files with base name in '%s'" % \
-                        outFile)
+            fatalError(
+              "Too many output files with base name '%s', in SweepSpec '%s'" %\
+                        (outBase, self.specName))
 
         self.outFile = outFile
 
@@ -767,17 +783,20 @@ def makeFileNameUnique(inFile, maxSuffix=1):
         fatalError('makeFileNameUnique maxSuffix value error\n' +
                    ' inFile="%s", maxSuffix=%d' % (inFile, maxSuffix))
 
-    # Generate names until found unique one or exceed max
+    # Generate names until we create a unique one
     fileNum = 1
     outFile = inFile
-    while fileNum <= maxSuffix and os.path.exists(outFile):
+    while os.path.exists(outFile):
         outFile = inFile +".%02d" % fileNum
         fileNum += 1
 
-    # Success?
-    if fileNum <= maxSuffix:
-        return outFile
-    return None
+    # Did we get to a surprising number of files with the same name
+    if fileNum > maxSuffix:
+        # If they're test files, it's okay, otherwise let's complain
+        if outFile.find('.TEST') < 0:
+            return None
+
+    return outFile
 
 
 #----------------------------------------------------------------------
@@ -896,7 +915,7 @@ remove the file "%s" to enable FileSweeper to run.
                 if spec.outFile and spec.outFile.find("Delete") == -1:
 
                     # Combine command line path with stored output path
-                    spec.makeOutFileName(outputDir)
+                    spec.makeOutFileName(outputDir, testMode)
 
                     # Create the directory path if necessary
                     # Already created outputDir, but we may need more
@@ -930,7 +949,7 @@ remove the file "%s" to enable FileSweeper to run.
             cdr.logwrite(str(spec), LF)
 
     except Exception, info:
-        sys.stderr.write('Exception halted processing on Spec "%s": %s' % \
-                         (spec.specName, info))
+        sys.stderr.write('Exception halted processing on: %s' % str(info))
         traceback.print_exc(file=sys.stderr)
-        traceback.print_exc(file=LF)
+        logf = open(LF, "a", 0)
+        traceback.print_exc(file=logf)
