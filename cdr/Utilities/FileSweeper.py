@@ -1,12 +1,18 @@
 #----------------------------------------------------------------------
 #
-# $Id: FileSweeper.py,v 1.6 2008-04-08 23:17:51 ameyer Exp $
+# $Id: FileSweeper.py,v 1.7 2008-06-10 14:45:28 ameyer Exp $
 #
 # Sweep up obsolete directories and files based on instructions in
 # a configuration file - deleting, truncating, or archiving files
 # and directories when required.
 #
 # $Log: not supported by cvs2svn $
+# Revision 1.6  2008/04/08 23:17:51  ameyer
+# Small fixes: 1) Add .TEST to output filenames in test mode. 2) Do not
+# prevent making large numbers of files with same name in test mode.
+# 3) Validate OutputFileName element exists if needed. 4) Fix broken
+# method of writing exception tracebacks to log file.
+#
 # Revision 1.5  2006/01/24 23:57:34  ameyer
 # Added some debugging checks to TruncateArchive to assure that file sizes
 # after processing are as expected.
@@ -231,7 +237,8 @@ class SweepSpec:
         for fileName in self.totalList:
 
             # Create a stat'ed object for it
-            fileObj = qualFile(normPath(fileName))
+            # Force string format in case name is all digits
+            fileObj = qualFile(normPath(str(fileName)))
 
             # Shorthand names for last modified time and file size
             mtime = fileObj.mtime
