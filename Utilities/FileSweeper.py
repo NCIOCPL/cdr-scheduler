@@ -1,6 +1,6 @@
 #----------------------------------------------------------------------
 #
-# $Id: FileSweeper.py,v 1.7 2008-06-10 14:45:28 ameyer Exp $
+# $Id$
 #
 # Sweep up obsolete directories and files based on instructions in
 # a configuration file - deleting, truncating, or archiving files
