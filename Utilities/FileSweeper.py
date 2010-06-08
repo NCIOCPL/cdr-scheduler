@@ -379,7 +379,8 @@ SweepSpec: "%s"
             try:
                 tar.add(fobj.fileName);
             except Exception, info:
-                self.addMsg("Tar error: %s" % info)
+                self.addMsg("Tar error (1): %s" % info)
+                self.addMsg("FileName: %s" % fobj.fileName)
                 self.addMsg("Abandoning this SweepSpec")
                 return
 
