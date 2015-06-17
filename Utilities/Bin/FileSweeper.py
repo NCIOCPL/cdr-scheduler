@@ -6,37 +6,10 @@
 # a configuration file - deleting, truncating, or archiving files
 # and directories when required.
 #
-# $Log: not supported by cvs2svn $
-# Revision 1.6  2008/04/08 23:17:51  ameyer
-# Small fixes: 1) Add .TEST to output filenames in test mode. 2) Do not
-# prevent making large numbers of files with same name in test mode.
-# 3) Validate OutputFileName element exists if needed. 4) Fix broken
-# method of writing exception tracebacks to log file.
-#
-# Revision 1.5  2006/01/24 23:57:34  ameyer
-# Added some debugging checks to TruncateArchive to assure that file sizes
-# after processing are as expected.
-#
-# Revision 1.4  2005/09/20 18:16:02  ameyer
-# Fixed bug causing files to be truncated even if none exceeded the
-# size threshold.
-# Made some other small cleanups the need for which was revealed by the
-# bug fix.
-#
-# Revision 1.3  2005/07/15 02:09:07  ameyer
-# Eliminated requirement to specify and OutputFile name if we are not
-# actually going to output any files.
-#
-# Revision 1.2  2005/07/01 03:20:28  ameyer
-# Bug fix.
-#
-# Revision 1.1  2005/07/01 02:31:55  ameyer
-# Cleanup program for old log and output files.
-#
-#
 #----------------------------------------------------------------------
 import sys, os, os.path, getopt, glob, shutil, time
 import traceback, re, xml.dom.minidom, tarfile, cdr
+import cdrutil
 
 # Logfile
 LF = cdr.DEFAULT_LOGDIR + "/FileSweeper.log"
@@ -52,6 +25,9 @@ DAY_SECS  = 86400
 YEAR_DAYS = 365.25
 YEARS_OLD = 5
 LONG_TIME = DAY_SECS * YEAR_DAYS * YEARS_OLD
+
+# Where are we running?
+TIER = cdrutil.getTier()
 
 #----------------------------------------------------------------------
 # Class encapsulating actions on one file
@@ -99,6 +75,9 @@ class SweepSpec:
         self.maxSizeSpec   = None       # If file bigger than this
         self.truncSizeSpec = None       # Truncate file to this size
 
+        # Start with the assumption that spec applies to all tiers.
+        self.tiers         = None
+
         # Set this flag to true when the archive is successfully saved
         self.okayToDelete  = False
 
@@ -122,6 +101,11 @@ class SweepSpec:
         # All times relative to right now, normalized to previous midnight
         now = normTime(time.time())
 
+        # Find out if this spec only applies to specific tiers.
+        tiers = specNode.getAttribute("Tiers")
+        if tiers:
+            self.tiers = set(tiers.split())
+
         # Load all significant fields
         for node in specNode.childNodes:
             if node.nodeType == xml.dom.minidom.Node.ELEMENT_NODE:
@@ -136,13 +120,13 @@ class SweepSpec:
                     for child in node.childNodes:
                         if child.nodeType == xml.dom.minidom.Node.ELEMENT_NODE:
                             if child.nodeName == 'File':
-                                self.inFiles.append(\
+                                self.inFiles.append(
                                   cdr.getTextContent(child))
                             elif child.nodeName == 'Comment':
                                 pass
                             else:
-                                fatalError(\
-                              'Unrecognized element "%s" in SweepSpec "%s"' \
+                                fatalError(
+                              'Unrecognized element "%s" in SweepSpec "%s"'
                                            % (child.nodeName, self.specName))
                 elif elem == 'OutputFile':
                     self.outFile = cdr.getTextContent(node)
@@ -156,12 +140,11 @@ class SweepSpec:
                 elif elem == 'Biggest':
                     self.maxSizeSpec = int(cdr.getTextContent(node))
                 elif elem == 'Smallest':
-                    self.truncSizeSpec = int(\
-                                        cdr.getTextContent(node))
+                    self.truncSizeSpec = int(cdr.getTextContent(node))
                 elif elem == 'Comment':
                     pass
                 else:
-                    fatalError('Unrecognized element "%s" in SweepSpec "%s"' \
+                    fatalError('Unrecognized element "%s" in SweepSpec "%s"'
                                % (elem, self.specName))
 
         # Validate
@@ -171,41 +154,54 @@ class SweepSpec:
             fatalError('No Action in SweepSpec "%s"' % self.specName);
         if self.action not in ('Archive', 'Delete', 'TruncateArchive',
                                'TruncateDelete'):
-            fatalError('Invalid Action "%s" in SweepSpec "%s"' % \
+            fatalError('Invalid Action "%s" in SweepSpec "%s"' %
                        (self.action, self.specName))
         if self.inFiles == []:
-            fatalError('No File (or InputFiles?) in SweepSpec "%s"' % \
+            fatalError('No File (or InputFiles?) in SweepSpec "%s"' %
                        self.specName);
 
         # Validate combinations of specs
         if not self.outFile and self.action in ('Archive','TruncateArchive'):
             fatalError(
-             "No output file specified for SweepSpec %s with Action=%s" % \
+             "No output file specified for SweepSpec %s with Action=%s" %
                 (self.specName, self.action))
         if not (self.oldSpec and self.youngSpec):
             if self.action == 'Archive':
-                fatalError(\
-                  'Must specify Oldest/Youngest for Archive SweepSpec "%s"' \
+                fatalError(
+                  'Must specify Oldest/Youngest for Archive SweepSpec "%s"'
                   % self.specName)
         if not (self.maxSizeSpec and self.truncSizeSpec):
             if self.action.startswith('Truncate'):
-                fatalError(\
-                  'Must specify Biggest/Smallest for Truncate SweepSpec "%s"'\
+                fatalError(
+                  'Must specify Biggest/Smallest for Truncate SweepSpec "%s"'
                   % self.specName)
 
         # Times must be reasonable e.g., now until 5 years before now
         if self.oldSpec:
             if self.oldSpec >= now or self.youngSpec >= now:
-                fatalError('A date >= current date in SweepSpec "%s"' % \
+                fatalError('A date >= current date in SweepSpec "%s"' %
                             self.specName)
             longAgo = now - LONG_TIME
             if self.oldSpec < longAgo or self.youngSpec < longAgo:
-                fatalError('A date is older than %d years in SweepSpec "%s"' % \
+                fatalError('A date is older than %d years in SweepSpec "%s"' %
                             (YEARS_OLD, self.specName))
 
         if self.oldSpec and self.maxSizeSpec:
             fatalError("Can't specify both big/small and old/young")
 
+
+    #----------------------------------------------------------------------
+    # Is this spec to be used on this tier?
+    #----------------------------------------------------------------------
+    def active(self):
+        """
+        Check to make sure this spec is not intended only for other tiers.
+        """
+        if self.tiers is None:
+            return True
+        if TIER in self.tiers:
+            return True
+        return False
 
     #----------------------------------------------------------------------
     # Find files matching a spec
@@ -248,8 +244,8 @@ class SweepSpec:
             self.totalBytes += fsize
 
             # Does this file qualify?
-            if (self.youngSpec and mtime < self.youngSpec) or \
-               (self.truncSizeSpec and fsize > self.truncSizeSpec):
+            if ((self.youngSpec and mtime < self.youngSpec) or
+                (self.truncSizeSpec and fsize > self.truncSizeSpec)):
 
                 # Yes, remember it
                 self.qualifiedList.append(fileObj)
@@ -306,9 +302,11 @@ class SweepSpec:
                                      time.localtime(self.youngestDate))
 
         # Basics from config file
+        tiers = self.tiers and " ".join(sorted(self.tiers)) or "ALL"
         specStr = """
 SweepSpec: "%s"
     Action:     %s
+    Tiers:      %s
     InputRoot:  %s
     Files:      %s
     OutputFile: %s
@@ -316,9 +314,8 @@ SweepSpec: "%s"
     Youngest:   %s
     Biggest:    %s
     Smallest:   %s
-""" % (self.specName, self.action, self.root, self.inFiles, self.outFile,
-       old, young,
-       self.maxSizeSpec, self.truncSizeSpec)
+""" % (self.specName, self.action, tiers, self.root, self.inFiles,
+       self.outFile, old, young, self.maxSizeSpec, self.truncSizeSpec)
 
         # If statFiles() called, report statistics
         if self.statted:
@@ -370,7 +367,7 @@ SweepSpec: "%s"
         try:
             tar = tarfile.open(self.outFile, "w:bz2")
         except Exception, info:
-            fatalError('Could not open tarfile "%s" for writing' \
+            fatalError('Could not open tarfile "%s" for writing'
                         % self.outFile)
 
         # Process each qualifying file
@@ -440,7 +437,7 @@ SweepSpec: "%s"
             try:
                 tar = tarfile.open(self.outFile, "w:bz2")
             except Exception, info:
-                fatalError('Could not open tarfile "%s" for writing' \
+                fatalError('Could not open tarfile "%s" for writing'
                             % self.outFile)
 
         # Process each qualifying file
@@ -454,7 +451,7 @@ SweepSpec: "%s"
 
             # If the temp file exists from a previous run, delete it
             if os.path.exists(tmpFile):
-                self.addMsg('Warning: overwriting old temporary output "%s"' \
+                self.addMsg('Warning: overwriting old temporary output "%s"'
                             % tmpFile)
                 os.remove(tmpFile)
 
@@ -477,7 +474,7 @@ SweepSpec: "%s"
                 destp.close()
                 srcp.close()
             except Exception, info:
-                self.addMsg(\
+                self.addMsg(
 """WARNING: Unable to create truncation of "%s::%s":
    %s
    Truncation was aborted""" % (self.specName, inFile, info))
@@ -485,12 +482,12 @@ SweepSpec: "%s"
 
             # Sanity debug checks
             if not os.path.exists(tmpFile):
-                fatalError('Temporary file "%s" not found - internal error' \
+                fatalError('Temporary file "%s" not found - internal error'
                             % tmpFile)
             tmpstat = os.stat(tmpFile)
             if tmpstat.st_size != self.truncSizeSpec:
                 self.addMsg(
-                  'WARNING: Temp file "%s" size=%d, but truncsize=%d\n' \
+                  'WARNING: Temp file "%s" size=%d, but truncsize=%d\n' %
                            (tmpFile, tmpstat.st_size, self.truncSizeSpec) +
                   '     Input file may have changed during processing')
 
@@ -505,19 +502,19 @@ SweepSpec: "%s"
                         srcp.truncate(truncPoint)
                         srcp.close()
                     except Exception, info:
-                        self.addMsg('Unable to truncate "%s::%s": %s' % \
+                        self.addMsg('Unable to truncate "%s::%s": %s' %
                                      (self.specName, inFile, info))
                         continue
 
                     # Sanity debug checks
                     fstat = os.stat(inFile)
                     if fstat.st_size != truncPoint:
-                        fatalError(\
-                         'Truncation file "%s" size=%d, truncsize=%d' %\
+                        fatalError(
+                         'Truncation file "%s" size=%d, truncsize=%d' %
                          (inFile, fstat.st_size, self.truncSizeSpec))
                     if (tmpstat.st_size + fstat.st_size) != fileObj.fsize:
-                        fatalError(\
-      'File "%s": Truncated and remaining sizes %d + %d != original size %d' %\
+                        fatalError(
+      'File "%s": Truncated and remaining sizes %d + %d != original size %d' %
                        (inFile, tmpstat.st_size, fstat.st_size, fileObj.fsize))
 
                 # Archive the truncation
@@ -533,7 +530,7 @@ SweepSpec: "%s"
                 try:
                     shutil.move(tmpFile, inFile)
                 except Exception, info:
-                    fatalError('Unable to replace original file "%s":\n   %s'\
+                    fatalError('Unable to replace original file "%s":\n   %s'
                                     % (inFile, info))
 
             # If we got this far, the truncation has occurred
@@ -566,20 +563,20 @@ SweepSpec: "%s"
                     if os.path.isdir(fileObj.fileName):
                         # Recursivley remove directory if it's empty
                         nameIsDir = True
-                        os.system("rm -r %s" % fileObj.fileName)
+                        shutil.rmtree(fileObj.fileName)
                     else:
                         # Remove ordinary file
                         os.remove(fileObj.fileName)
                     fileObj.deleted = True
                 else:
-                    self.addMsg('Test mode, not deleting "%s"' % \
+                    self.addMsg('Test mode, not deleting "%s"' %
                                  fileObj.fileName)
             except Exception, info:
                 if nameIsDir:
-                    self.addMsg("Error removing directory %s: %s" % \
+                    self.addMsg("Error removing directory %s: %s" %
                                 (fileObj.fileName, info))
                 else:
-                    self.addMsg("Unable to remove file %s: %s" % \
+                    self.addMsg("Unable to remove file %s: %s" %
                                 (fileObj.fileName, info))
 
 
@@ -644,7 +641,7 @@ SweepSpec: "%s"
         # Sanity check
         if not outFile:
             fatalError(
-              "Too many output files with base name '%s', in SweepSpec '%s'" %\
+              "Too many output files with base name '%s', in SweepSpec '%s'" %
                         (outBase, self.specName))
 
         self.outFile = outFile
@@ -725,13 +722,15 @@ def loadConfigFile(fileName):
     # Load specifications
     docElem = dom.documentElement
     if dom.documentElement.nodeName != 'SweepSpecifications':
-        fatalError("SweepSpecifications not found at root of config file %s" \
+        fatalError("SweepSpecifications not found at root of config file %s"
                    % fileName)
 
     for node in docElem.childNodes:
         if node.nodeType == xml.dom.minidom.Node.ELEMENT_NODE:
             if node.nodeName == 'SweepSpec':
-                spec.append(SweepSpec(node))
+                ss = SweepSpec(node)
+                if ss.active():
+                    spec.append(ss)
 
     return spec
 
@@ -899,15 +898,16 @@ remove the file "%s" to enable FileSweeper to run.
             os.makedirs(outputDir)
         except Exception, info:
             fatalError(
-              """Directory "%s" does not exist, can't create it: %s""" \
+              """Directory "%s" does not exist, can't create it: %s"""
               % (outputDir, info))
     if not os.path.isdir(outputDir):
-        fatalError('Command line output name "%s" is not a directory' \
+        fatalError('Command line output name "%s" is not a directory'
                     % outputDir)
 
     # Process each archive specification
     try:
         for spec in specList:
+
             # Change to input file root directory
             try:
                 os.chdir(spec.root)
@@ -932,7 +932,7 @@ remove the file "%s" to enable FileSweeper to run.
                         try:
                             os.makedirs(fileBase)
                         except Exception, info:
-                            fatalError('Error creating directory "%s": %s' \
+                            fatalError('Error creating directory "%s": %s'
                                         % (fileBase, info))
                     if not os.path.isdir(fileBase):
                         fatalError('Config output name "%s" is not a directory')
@@ -949,12 +949,20 @@ remove the file "%s" to enable FileSweeper to run.
                 try:
                     os.chdir(cwd)
                 except Exception, info:
-                    fatalError(\
-     """SweepSpec "%s" could not return to directory "%s" - can't happen""" \
+                    fatalError(
+     """SweepSpec "%s" could not return to directory "%s" - can't happen"""
                         % (spec.specName, cwd))
 
             # Report results to log file
             cdr.logwrite(str(spec), LF)
+
+        # Print a finished separator in log file
+        # If a single step takes a very long time (i.e. archiving the
+        # Job???? directories) it might appear that nothing is written
+        # to the file and therefore the job is done.
+        cdr.logwrite("""
+      ----------- Finished File Sweep -------------
+""", LF)
 
     except Exception, info:
         sys.stderr.write('Exception halted processing on: %s' % str(info))
