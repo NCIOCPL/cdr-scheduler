@@ -7,9 +7,9 @@
 # and directories when required.
 #
 #----------------------------------------------------------------------
-import sys, os, os.path, getopt, glob, shutil, time
+import sys, os, os.path, getopt, glob, shutil, time, datetime, lxml.etree as et
 import traceback, re, xml.dom.minidom, tarfile, cdr
-import cdrutil
+import cdrutil, cdrdb
 
 # Logfile
 LF = cdr.DEFAULT_LOGDIR + "/FileSweeper.log"
@@ -23,7 +23,7 @@ BLOCK_SIZE = 4096
 # Date constants, YEARS_OLD is max time we'll look back, sanity check
 DAY_SECS  = 86400
 YEAR_DAYS = 365.25
-YEARS_OLD = 5
+YEARS_OLD = 10
 LONG_TIME = DAY_SECS * YEAR_DAYS * YEARS_OLD
 
 # Where are we running?
@@ -74,6 +74,7 @@ class SweepSpec:
         self.youngSpec     = None       # Files must be older than this
         self.maxSizeSpec   = None       # If file bigger than this
         self.truncSizeSpec = None       # Truncate file to this size
+        self.customProc    = None       # Name of custom sweep routine, if any
 
         # Start with the assumption that spec applies to all tiers.
         self.tiers         = None
@@ -131,16 +132,18 @@ class SweepSpec:
                 elif elem == 'OutputFile':
                     self.outFile = cdr.getTextContent(node)
                 elif elem == 'Oldest':
-                    # Convert to system time = seconds since epoch
-                    days = int(cdr.getTextContent(node))
+                    # Convert to UNIX time = seconds since epoch
+                    days         = int(cdr.getTextContent(node))
                     self.oldSpec = now - (days * DAY_SECS)
                 elif elem == 'Youngest':
-                    days = int(cdr.getTextContent(node))
+                    days           = int(cdr.getTextContent(node))
                     self.youngSpec = now - (days * DAY_SECS)
                 elif elem == 'Biggest':
                     self.maxSizeSpec = int(cdr.getTextContent(node))
                 elif elem == 'Smallest':
                     self.truncSizeSpec = int(cdr.getTextContent(node))
+                elif elem == 'CustomProc':
+                    self.customProc = cdr.getTextContent(node)
                 elif elem == 'Comment':
                     pass
                 else:
@@ -153,12 +156,13 @@ class SweepSpec:
         if not self.action:
             fatalError('No Action in SweepSpec "%s"' % self.specName);
         if self.action not in ('Archive', 'Delete', 'TruncateArchive',
-                               'TruncateDelete'):
+                               'TruncateDelete', 'Custom'):
             fatalError('Invalid Action "%s" in SweepSpec "%s"' %
                        (self.action, self.specName))
         if self.inFiles == []:
-            fatalError('No File (or InputFiles?) in SweepSpec "%s"' %
-                       self.specName);
+            if self.action != 'Custom':
+                fatalError('No File (or InputFiles?) in SweepSpec "%s"' %
+                           self.specName);
 
         # Validate combinations of specs
         if not self.outFile and self.action in ('Archive','TruncateArchive'):
@@ -175,16 +179,28 @@ class SweepSpec:
                 fatalError(
                   'Must specify Biggest/Smallest for Truncate SweepSpec "%s"'
                   % self.specName)
+        if self.customProc and self.customProc == 'expireMeetingRecordings':
+            if not self.oldSpec:
+                fatalError('Must specify Oldest for Custom SweepSpec "%s"'
+                            % self.specName)
 
-        # Times must be reasonable e.g., now until 5 years before now
+
+        # Times should be reasonable e.g., now until 10 years before now
         if self.oldSpec:
             if self.oldSpec >= now or self.youngSpec >= now:
                 fatalError('A date >= current date in SweepSpec "%s"' %
                             self.specName)
             longAgo = now - LONG_TIME
-            if self.oldSpec < longAgo or self.youngSpec < longAgo:
-                fatalError('A date is older than %d years in SweepSpec "%s"' %
+
+            if self.oldSpec and self.oldSpec < longAgo:
+                fatalError(
+                    '"Oldest" date is older than %d years in SweepSpec "%s"' %
                             (YEARS_OLD, self.specName))
+            if self.youngSpec and self.youngSpec < longAgo:
+                fatalError(
+                    '"Youngest" date is older than %d years in SweepSpec "%s"' %
+                            (YEARS_OLD, self.specName))
+
 
         if self.oldSpec and self.maxSizeSpec:
             fatalError("Can't specify both big/small and old/young")
@@ -648,6 +664,188 @@ SweepSpec: "%s"
 
 
     #----------------------------------------------------------------------
+    # Remove out of date Media recordings
+    #----------------------------------------------------------------------
+    def expireMeetingRecordings(self, testMode):
+        """
+        This is a "Custom" routine that sweeps away MP3 format meeting
+        recordings that have passed their useful life.  Implemented for
+        JIRA Issue OCECDR-3886.
+
+        Pass:
+            testMode
+                True  = Don't actually delete any blobs, just report
+                False = Update docs and delete blobs.
+        """
+        cursor  = None
+        session = None
+
+        # Need a connection to the CDR Server
+        session = cdr.login('FileSweeper', 'SnIxg$ZzBNbR')
+        if not session:
+            log("ERROR: FileSweeper login to CdrServer failed")
+            # But no reason not to do the rest of the sweep
+            return
+
+        # And a read-only connection to the database
+        try:
+            conn = cdrdb.connect()
+            cursor = conn.cursor()
+        except Exception as e:
+            logException(e, "attempting DB connect")
+
+            # But continue with the sweep
+            cleanSession(cursor, session)
+            return
+
+        # Today's SQL Server date
+        try:
+            cursor.execute("SELECT GETDATE()")
+            now = cursor.fetchone()[0]
+        except Exception as e:
+            logException(e, 'getting DB date')
+            cleanSession(cursor, session)
+            return
+
+        # Only want YYYY-MM-DD, not HMS
+        nowDate = now[:10]
+
+        # Locate all Media documents linked to meeting recordings that
+        #  are older than Oldest days.
+        # This is done by checking for any ADD DOCUMENT transaction in the
+        #  audit trail for one of the qualifying documents.  If any ADD was
+        #  performed before the Oldest value, then there was a version of
+        #  the meeting recording from before that date.
+        # The Media doc must also be found in one of the ...blob_usage tables.
+        #  If not, then any blob associated with it has already been deleted.
+        isoFmt    = "%Y-%m-%d"
+        earlyDate = \
+            datetime.datetime.fromtimestamp(self.oldSpec).strftime(isoFmt)
+
+        # DEBUG
+        # log("Looking for meeting recordings older than %s" % earlyDate)
+
+        qry = """
+        SELECT d.id, d.title
+          FROM document d
+          JOIN query_term qt
+            ON qt.doc_id = d.id
+          JOIN audit_trail at
+            ON at.document = d.id
+          JOIN action act
+            ON act.id = at.action
+         WHERE qt.path = '/Media/MediaContent/Categories/Category'
+           AND qt.value = 'meeting recording'
+           AND act.name = 'ADD DOCUMENT'
+           AND at.dt <= '%s'
+           AND (
+              d.id IN ( SELECT doc_id FROM doc_blob_usage )
+             OR
+              d.id IN ( SELECT doc_id FROM version_blob_usage )
+           )
+        """ % earlyDate
+
+        # Read the info into memory
+        try:
+            cursor.execute(qry)
+            rows = cursor.fetchall()
+        except Exception as e:
+            logException(e, 'attempting to locate old blobs')
+            cleanSession(cursor, session)
+            return
+
+        # If there weren't any, that's normal and okay
+        if len(rows) == 0:
+            log("No meeting recordings needed to be deleted")
+            cleanSession(cursor, session)
+            return
+
+        # Do we need to lock and load the docs for update?
+        checkOut = 'Y'
+        if testMode:
+            checkOut = 'N'
+
+        #-------------------------------------------------------------------
+        # We've got some to delete.
+        # For each Media document:
+        #  Send a transaction to the CDR Server to do the following:
+        #   Add a ProcessingStatus to the Media document to say what happened
+        #   Delete all of the blobs.
+        #-------------------------------------------------------------------
+        for row in rows:
+
+            docId, title = row
+
+            # Fetch the original document
+            # We'll do this even in test mode to test the xml mods
+            try:
+                docObj = cdr.getDoc(session, docId, checkout=checkOut,
+                                    getObject=True)
+            except Exception as e:
+                logException (e, 'attempting to fetch doc %d' % docId)
+                cleanSession(cursor, session)
+                return
+
+            # Test for retrieval error, e.g., locked doc
+            err = cdr.checkErr(docObj)
+            if err:
+                log("Failed getDoc for CDR ID %s: %s, continuing" %
+                    (docId, err))
+                continue
+
+
+            # Parse the xml preparatory to modifying it
+            mediaRoot = et.fromstring(docObj.xml)
+
+            # Create the new Comment field to record what we did
+            # Make it the last subelement of the Media document element
+            # It has to be there
+            comment = et.SubElement(mediaRoot, 'Comment',
+                                    audience='Internal',
+                                    user='FileSweeper',
+                                    date=nowDate)
+            comment.text = "Removed meeting recording object after expiration"
+
+            # Back to serial XML
+            newXml = et.tostring(mediaRoot)
+
+            # If we're testing, just log what we would have done
+            if testMode:
+                # For log file
+                actionMsg = 'would delete'
+
+            else:
+                # Send the doc back to the database:
+                #  Wrapped in CdrDoc wrapper
+                #  With command to delete all blobs
+                actionMsg = 'deleted'
+                saveXml  = cdr.makeCdrDoc(newXml, 'Media', docObj.id)
+                response = cdr.repDoc(session, doc=saveXml,
+                            comment='Removed meeting recording blobs',
+                            delAllBlobVersions=True)
+
+                # Check response
+                if not response[0]:
+                     errors = cdr.getErrors(response[1], errorsExpected=True,
+                                            asSequence=False)
+                     log("ERROR: Saving Media xml for doc %s: %s\n%s"
+                                  % (docObj.id, errors,
+                                  'Aborting expireMeetingRecords()'))
+
+                     # Stop doing this, but continue rest of file sweeps.
+                     cleanSession(cursor, session)
+                     return
+
+            # Log results for this media recording
+            msg = "FileSweeper %s blobs for cdrId: %s\n%s" % \
+                  (actionMsg, docId, title)
+            log(msg)
+
+        # Cleanup
+        cleanSession(cursor, session)
+
+
+    #----------------------------------------------------------------------
     # Report results via HTML
     #----------------------------------------------------------------------
     def reportHTML(self):
@@ -807,6 +1005,31 @@ def makeFileNameUnique(inFile, maxSuffix=1):
 
 
 #----------------------------------------------------------------------
+# Cleanup CdrServer and database connections
+#----------------------------------------------------------------------
+def cleanSession(cursor, session):
+    """
+    If there is a session or cursor open, close it appropriately.  If
+    operation fails, log failure and continue.
+
+    Pass:
+        session - Open CDR session or None.
+        cursor  - Open database cursor or None.
+    """
+    if cursor:
+        try:
+            cursor.close()
+        except Exception as e:
+            logException(e, 'closing db cursor')
+
+    if session:
+        try:
+            cdr.logout(session)
+        except Exception as e:
+            logException(e, 'logging out of session')
+
+
+#----------------------------------------------------------------------
 # Fatal error
 #----------------------------------------------------------------------
 def fatalError(msg):
@@ -818,13 +1041,39 @@ def fatalError(msg):
         Error message.
     """
     msg = "FATAL error: %s\n" %msg
-    cdr.logwrite(msg, LF)
-    sys.stderr.write(msg)
+    log(msg)
     sys.exit(1)
 
+
+#----------------------------------------------------------------------
+# Log a message
+#----------------------------------------------------------------------
 def log(msg):
+    """
+    Write message to log file and to stderr.
+    """
     cdr.logwrite(msg, LF)
     sys.stderr.write(msg)
+    sys.stderr.write("\n")
+
+
+#----------------------------------------------------------------------
+# Log exceptions
+#----------------------------------------------------------------------
+def logException(e, msg, fatal=False):
+    """
+    Log an exception object.
+
+    Pass:
+        e     - Exception object of any type.
+        msg   - Log this as the cause.
+        fatal - True = Abort processing
+    """
+    eMsg = "ERROR, Exception %s. Type=%s, msg=%s" % (msg, type(e), e)
+    if fatal:
+        fatal(eMsg)
+    log(eMsg)
+
 
 #----------------------------------------------------------------------
 #                           MAIN
@@ -868,7 +1117,7 @@ remove the file "%s" to enable FileSweeper to run.
         if opts[0][0] in ("-t", "--test"):
             testMode = True
 
-    # XXX For testing only
+    # XXX DEBUG - For testing only
     # testMode = True
 
     # Load the configuration file, fatal if fails
@@ -907,6 +1156,19 @@ remove the file "%s" to enable FileSweeper to run.
     # Process each archive specification
     try:
         for spec in specList:
+
+            # Custom actions don't necessarily look at files
+            if spec.action == 'Custom':
+                # Jump table for custom procs
+                if spec.customProc == 'expireMeetingRecordings':
+                    spec.expireMeetingRecordings(testMode)
+
+                # elif: next goes here
+                else:
+                    log("ERROR: CustomSpec 'expireMeetingRecordings' unknown")
+
+                # Custom routines don't use any standard facilities
+                continue
 
             # Change to input file root directory
             try:
