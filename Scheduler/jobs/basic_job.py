@@ -22,7 +22,7 @@ class BasicJob(CDRJob):
                 # configuration document
                 {'type': 'string', 'description': 'JSON-like configuration document.'}
             ],
-            'example_arguments': '["test_task.TestTask", {"property1" : 1, "property2" : "foo", "property3" : None}]'
+            'example_arguments': '["test_task.TestTask", {"property1" : 1, "property2" : "foo", "property3" : null}]'
         }
 
     def run(self, taskname, config, *args, **kwargs):

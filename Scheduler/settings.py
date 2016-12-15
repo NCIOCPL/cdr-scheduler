@@ -1,28 +1,30 @@
 """Settings to override default settings."""
 
+import datetime
 import logging
 import logging.config
 import logging.handlers
 
+import cdr
 from util.cdr_connection_info import CDRDBConnectionInfo
-
 
 #
 # Override settings
 #
 DEBUG = True
-
+TIMEZONE = "America/New_York"
 HTTP_PORT = 8888
 HTTP_ADDRESS = '127.0.0.1'
-
 
 # Limit a configured job to only one instance running at a time.
 JOB_MAX_INSTANCES = 1
 
 # Configure logging
-handler = logging.FileHandler("d:\\cdr\\Log\\scheduler.log")
+handler = logging.FileHandler("%s/scheduler.log" % cdr.DEFAULT_LOGDIR)
+formatter = cdr.Logging.Formatter(cdr.Logging.FORMAT)
+handler.setFormatter(formatter)
 logging.getLogger().addHandler(handler)
-logging.getLogger().setLevel(logging.ERROR)
+logging.getLogger().setLevel(logging.DEBUG)
 
 
 # List of packages containing job classes. (Relative to the main scheduler script.)

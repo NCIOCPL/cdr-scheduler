@@ -1,7 +1,5 @@
 #----------------------------------------------------------------------
 #
-# $Id$
-#
 # Sweep up obsolete directories and files based on instructions in
 # a configuration file - deleting, truncating, or archiving files
 # and directories when required.
@@ -23,8 +21,13 @@ import tarfile
 import logging
 import cdr
 import cdrutil
-import cdrdb
 
+import cdrdb2 as cdrdb
+"""
+Swap in replacement DB API implementation based on freetds (the original
+implementation, based on Microsoft's OLEDB, doesn't deal with multi-
+threading well).
+"""
 
 from cdr_task_base import CDRTask
 from core.exceptions import TaskException
@@ -756,7 +759,7 @@ SweepSpec: "%s"
             return
 
         # Only want YYYY-MM-DD, not HMS
-        nowDate = now[:10]
+        nowDate = str(now)[:10]
 
         # Locate all Media documents linked to meeting recordings that
         #  are older than Oldest days.
@@ -1095,7 +1098,8 @@ def fatalError(msg):
     sender = 'FileSweeper-NoRepy@cdr.cancer.gov'
     if not recips:
         try:
-            recips = cdr.getEmailList('FileSweeper Error Notification')
+            group = "FileSweeper Error Notification"
+            recips = CDRTask.get_group_email_addresses(group)
         except Exception as e:
             logger.exception("Getting email recipients from the CDR")
             logException(e, "Getting email recipients from the CDR")
@@ -1120,7 +1124,6 @@ Error message was:
         except Exception as e:
             logger.exception("Attempting to send mail for fatal error")
             logException(e, "Attempting to send mail for fatal error")
-            
 
     if mailSent:
         logger.info("Mail sent to: %s" % recips)
@@ -1166,7 +1169,8 @@ def logException(e, msg, fatal=False):
 # script to be run from the command line, and another via the FileSweeper
 # task class.
 #----------------------------------------------------------------------
-def sweepFiles(passedConfigFile, passedTestMode = False, passedRecips = None, passedOutputDir = "" ):
+def sweepFiles(passedConfigFile, passedTestMode=False, passedRecips=None,
+               passedOutputDir=""):
 
     # We want to work with the global versions of these variables.
     global configFile, testMode, recips, outputDir
@@ -1177,8 +1181,10 @@ def sweepFiles(passedConfigFile, passedTestMode = False, passedRecips = None, pa
 
     # Don't allow two filesweepers to run at the same time
     lockFileName = "/cdr/log/FileSweeper.lockfile"
+    needToReleaseLockFile = True
     try:
         if not cdr.createLockFile(lockFileName):
+            needToReleaseLockFile = False
             fatalError("""
 It appears that another copy of FileSweeper is currently running.
 
@@ -1311,9 +1317,11 @@ remove the file "%s" to enable FileSweeper to run.
             traceback.print_exc(file=logf)
 
     # The scheduler (ideally) never exits, so we must remove the
-    # lock file explicitly.
+    # lock file explicitly. Don't remove it if the lock might belong
+    # to another running process.
     finally:
-        cdr.removeLockFile(lockFileName)
+        if needToReleaseLockFile:
+            cdr.removeLockFile(lockFileName)
 
 #----------------------------------------------------------------------
 #                           MAIN
