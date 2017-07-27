@@ -13,6 +13,8 @@ class PublishingTask(CDRTask):
     Other publishing jobs are run directly from the CDR Admin interface.
     """
 
+    LOGNAME = "publishing-task"
+
     def __init__(self, parms, data):
         """
         Initialize the base class then instantiate our Control object,
@@ -229,6 +231,7 @@ if __name__ == "__main__":
     """
 
     import argparse
+    import logging
     formatter_class = argparse.ArgumentDefaultsHelpFormatter
     parser = argparse.ArgumentParser(description="Do some publishing",
                                      formatter_class=formatter_class)
@@ -247,5 +250,5 @@ if __name__ == "__main__":
                         default="info", help="verbosity of scheduler logging")
     args = parser.parse_args()
     opts = dict([(k.replace("_", "-"), v) for k, v in args._get_kwargs()])
-    logger = CDRTask.get_logger(opts)
-    Control(opts, logger).run()
+    logging.basicConfig(format=cdr.Logging.FORMAT, level=args.log_level.upper())
+    Control(opts, logging.getLogger()).run()

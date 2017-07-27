@@ -1,15 +1,107 @@
 """Run the scheduler process."""
 
-import settings
-from ndscheduler.server import server
+import logging
+import sys
+import cdr
+import cdrdb2 as cdrdb
 
+# Things we need to do before loading the other modules.
+class Config:
+    TIER = cdrdb.h.tier
+    SENDER = "cdr@cancer.gov"
+
+    @classmethod
+    def init(cls):
+        logging.basicConfig(
+            filename="%s/scheduler.log" % cdr.DEFAULT_LOGDIR,
+            format="[%(process)s/%(thread)s] " + cdr.Logging.FORMAT,
+            level=logging.DEBUG
+        )
+        try:
+            query = cdrdb.Query("usr e", "e.email")
+            query.join("grp_usr u", "u.usr = e.id")
+            query.join("grp g", "g.id = u.grp")
+            query.where("g.name = 'Developers Notification'")
+            rows = query.execute(timeout=5).fetchall()
+            cls.RECIPS = [row[0] for row in rows if row[0]]
+        except:
+            logging.exception("database unavailable - exiting")
+            sys.exit(1)
+        if cls.RECIPS:
+            try:
+                subject = "[%s] CDR Scheduler service restarted" % cls.TIER
+                cdr.sendMail(cls.SENDER, cls.RECIPS, subject, "")
+            except:
+                pass
+Config.init()
+
+# Now bring in the other modules we need.
+import tornado
+from sqlalchemy import event
+from sqlalchemy.pool import Pool
+from ndscheduler import settings
+from ndscheduler.server.handlers import audit_logs
+from ndscheduler.server.handlers import executions
+from ndscheduler.server.handlers import index
+from ndscheduler.server.handlers import jobs
+from ndscheduler.server import server
 
 class CDRScheduler(server.SchedulerServer):
 
-    # Logic to cleanup outstanding jobs goes in start_scheduler().
+    def __init__(self, scheduler_instance):
+        """Launch a web server to handle administering jobs.
+
+        Unfortunately, the ndscheduler constructor does not
+        expose the ability to control whether the tornado
+        module can restart the scheduler when files change,
+        so we have to override the constructor completely.
+        That means that we'll lose any bug fixes or enhancements
+        introduced later by ndscheduler in the constructor,
+        and could even mean that they could do something which
+        could break our constructor. We'll try to give them a
+        patch which solves the problem by exposing the ability
+        to pass in custom tornado settings.
+        """
+
+        self.scheduler_manager = scheduler_instance
+
+        self.tornado_settings = dict(
+            debug=settings.DEBUG,
+            static_path=settings.STATIC_DIR_PATH,
+            template_path=settings.TEMPLATE_DIR_PATH,
+            scheduler_manager=self.scheduler_manager,
+            autoreload=False
+        )
+
+        # Setup server
+        URLS = [
+            # Index page
+            (r"/", index.Handler),
+
+            # APIs
+            (r"/api/%s/jobs" % self.VERSION, jobs.Handler),
+            (r"/api/%s/jobs/(.*)" % self.VERSION, jobs.Handler),
+            (r"/api/%s/executions" % self.VERSION, executions.Handler),
+            (r"/api/%s/executions/(.*)" % self.VERSION, executions.Handler),
+            (r"/api/%s/logs" % self.VERSION, audit_logs.Handler),
+        ]
+        self.application = tornado.web.Application(URLS,
+                                                   **self.tornado_settings)
+
     def start_scheduler(self):
+        """
+        Clean up outstanding failed jobs and start the scheduler.
+        """
+
         self.fix_zombies()
         server.SchedulerServer.start_scheduler(self)
+
+    def post_scheduler_stop(self):
+        """
+        Add our own logging to find out when the scheduler is stopped.
+        """
+
+        logging.info("CDR scheduler stopped")
 
     @staticmethod
     def fix_zombies():
@@ -46,12 +138,36 @@ class CDRScheduler(server.SchedulerServer):
         datastore = scheduler.get_datastore()
         query = select([eid_col]).where(state_col == running)
         eids = [row.eid for row in datastore.engine.execute(query)]
-        settings.logging.info("found %d zombie executions", len(eids))
+        logging.info("found %d zombie executions", len(eids))
         for eid in eids:
             print eid, (repr(eid))
-            settings.logging.info("marking zombie %s as FAILED", eid)
+            logging.info("marking zombie %s as FAILED", eid)
             datastore.update_execution(eid, state=failed, description=desc)
 
+    @staticmethod
+    @event.listens_for(Pool, "checkout")
+    def db_ping(conn, record, proxy):
+        """
+        Hook into the sqlalchemy layer to detect lost db connections.
+
+        We need to exit when that happens so the service manager can
+        keep trying to restart us until the database access is restored.
+        """
+
+        try:
+            #logging.info("db_ping")
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            cursor.close()
+        except Exception as e:
+            logging.exception("database failure - exiting")
+            if Config.RECIPS:
+                try:
+                    subject = "[%s] CDR Scheduler DB failure" % Config.TIER
+                    cdr.sendMail(Config.SENDER, Config.RECIPS, subject, str(e))
+                except:
+                    pass
+            sys.exit(1)
 
 if __name__ == "__main__":
     CDRScheduler.run()

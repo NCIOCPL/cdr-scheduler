@@ -5,12 +5,10 @@ Perform scheduled updates of electronic mailer tracking documents.
 import lxml.etree as etree
 import requests
 import cdr
-import cdrmailcommon
-import logging
-import settings
 from cdr_task_base import CDRTask
 from task_property_bag import TaskPropertyBag
-
+from requests.packages.urllib3.exceptions import InsecureRequestWarning
+requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 class UpdateTask(CDRTask):
     """
@@ -18,9 +16,11 @@ class UpdateTask(CDRTask):
     job.
     """
 
+    LOGNAME = "mailer"
+
     def Perform(self):
         "Hand off the real work to the Mailer class."
-        Mailer.run()
+        Mailer.run(self.logger)
         return TaskPropertyBag()
 
 
@@ -131,20 +131,13 @@ class Mailer:
             self.logger.warn("mailer %s: %s", mailerId, response.text)
 
     @classmethod
-    def run(cls):
+    def run(cls, logger):
         """
         Ask the emailer server for a list of the mailers whose
         disposition needs to be recorded, and update the tracker
         document for each one.
         """
 
-        # Set up logging to the standard mailer log file.
-        handler = logging.FileHandler(cdrmailcommon.LOGFILE)
-        handler.setFormatter(settings.formatter)
-        logger = logging.getLogger("emailer_tracking")
-        logger.addHandler(handler)
-        logger.setLevel(logging.INFO)
-        logger.propagate = False
         logger.info("emailer_tracking job started")
 
         # Log into the CDR server with a local machine account.
@@ -173,4 +166,6 @@ class Mailer:
 
 if __name__ == "__main__":
     "Make it possible to run this task from the command line."
-    Mailer.run()
+    import logging
+    logging.basicConfig(format=cdr.Logging.FORMAT, level=logging.INFO)
+    Mailer.run(logging.getLogger())

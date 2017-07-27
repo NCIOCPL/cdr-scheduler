@@ -5,17 +5,16 @@ Logic for Gov Delivery reports
 import cdr
 import cdrdb2 as cdrdb
 import datetime
-import logging
-import settings
 
 from cdr_task_base import CDRTask
-from core.exceptions import TaskException
 from task_property_bag import TaskPropertyBag
 
 class ReportTask(CDRTask):
     """
     Implements subclass for managing scheduled GovDelivery reports.
     """
+
+    LOGNAME = "gov_delivery_reports"
 
     def __init__(self, parms, data):
         """
@@ -24,7 +23,7 @@ class ReportTask(CDRTask):
         """
 
         CDRTask.__init__(self, parms, data)
-        self.control = Control(parms)
+        self.control = Control(parms, self.logger)
 
     def Perform(self):
         "Hand off the real work to the Control object."
@@ -38,7 +37,6 @@ class Control:
 
     Class constants:
 
-    LOGFILE         We write our log entries here.
     TITLES          Map of report key to distinguishing part of report title.
     DEFAULT_START   Fall back on this for beginning of date range for report.
     DEFAULT_END     Fall back on this for end of date range.
@@ -65,7 +63,6 @@ class Control:
 
     import lxml.html.builder as B
     import lxml.html as HTML
-    LOGFILE = "%s/gov_delivery_reports.log" % cdr.DEFAULT_LOGDIR
     TITLES = {
         "trials": "Trials",
         "english": "New/Changed English Summaries",
@@ -90,9 +87,9 @@ class Control:
     }
     CG = "%s.%s" % tuple(cdr.h.host['CG'])
 
-    def __init__(self, options):
+    def __init__(self, options, logger):
         """
-        Save the logger object and extract and validate the settings:
+        Validate the settings:
 
         reports
             "english", "spanish", and/or "trials"; defaults to all three
@@ -115,35 +112,16 @@ class Control:
             overrides the default end of the date range (today)
         """
 
+        self.logger = logger
         self.reports = options.get("reports") or self.REPORTS
         self.mode = options["mode"]
         self.skip_email = options.get("skip-email", False)
         self.start = options.get("start") or str(self.DEFAULT_START)
         self.end = options.get("end") or str(self.DEFAULT_END)
         self.test = self.mode == "test"
-        self.logger = self.create_logger(options)
         self.cursor = cdrdb.connect("CdrGuest").cursor()
-
-    def create_logger(self, opts):
-        """
-        Set up logging to the our own log file.
-
-        opts      Dictionary of run time options, from which we
-                  extract the value telling us how verbose the
-                  logging should be.
-        """
-
-        log_level = opts.get("log-level", "info")
-        handler = logging.FileHandler(self.LOGFILE)
-        handler.setFormatter(settings.formatter)
-        logger = logging.getLogger("gov_delivery_reports")
-        logger.addHandler(handler)
-        logger.setLevel(CDRTask.LOG_LEVELS.get(log_level, logging.INFO))
-        logger.propagate = False
-        logger.info("%s job started", self.mode)
         if self.skip_email:
-            logger.info("skipping email of reports")
-        return logger
+            self.logger.info("skipping email of reports")
 
     def run(self):
         "Run each of the reports we've been asked to create."
@@ -674,6 +652,7 @@ def main():
     """
 
     import argparse
+    import logging
     fc = argparse.ArgumentDefaultsHelpFormatter
     desc = "Report on new/changed CDR documents for GovDelivery"
     reports = ["english", "spanish", "trials"]
@@ -690,7 +669,8 @@ def main():
     parser.add_argument("--end", help="optional end of date range")
     args = parser.parse_args()
     opts = dict([(k.replace("_", "-"), v) for k, v in args._get_kwargs()])
-    Control(opts).run()
+    logging.basicConfig(format=cdr.Logging.FORMAT, level=args.log_level.upper())
+    Control(opts, logging.getLogger()).run()
 
 if __name__ == "__main__":
     main()

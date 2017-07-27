@@ -5,17 +5,16 @@ Logic for reports on the translation job queue
 import cdr
 import cdrdb2 as cdrdb
 import datetime
-import logging
-import settings
 
 from cdr_task_base import CDRTask
-from core.exceptions import TaskException
 from task_property_bag import TaskPropertyBag
 
 class ReportTask(CDRTask):
     """
     Implements subclass for managing scheduled translation job reports.
     """
+
+    LOGNAME = "scheduled_translation_job_report"
 
     def __init__(self, parms, data):
         """
@@ -24,7 +23,7 @@ class ReportTask(CDRTask):
         """
 
         CDRTask.__init__(self, parms, data)
-        self.control = Control(parms)
+        self.control = Control(parms, self.logger)
 
     def Perform(self):
         "Hand off the real work to the Control object."
@@ -36,10 +35,6 @@ class Control:
     This is the class that does the real work. It is separated out so that
     we can provide a way to run this task from the command line.
 
-    Class constants:
-
-    LOGFILE         We write our log entries here.
-
     Instance properties:
 
     mode            Required report mode ("test" or "live").
@@ -48,9 +43,7 @@ class Control:
     cursor          Object for submitting queries to the database.
     """
 
-    LOGFILE = "%s/scheduled_translation_job_report.log" % cdr.DEFAULT_LOGDIR
-
-    def __init__(self, options):
+    def __init__(self, options, logger):
         """
         Save the logger object and extract and validate the settings:
 
@@ -59,35 +52,18 @@ class Control:
             recipient list for report
         """
 
+        self.logger = logger
         self.mode = options["mode"]
         self.test = self.mode == "test"
         self.title = "Translation Jobs Queue Report"
-        self.logger = self.create_logger(options)
         self.cursor = cdrdb.connect("CdrGuest").cursor()
-
-    def create_logger(self, opts):
-        """
-        Set up logging to the our own log file.
-
-        opts      Dictionary of run time options, from which we
-                  extract the value telling us how verbose the
-                  logging should be.
-        """
-
-        log_level = opts.get("log-level", "info")
-        handler = logging.FileHandler(self.LOGFILE)
-        handler.setFormatter(settings.formatter)
-        logger = logging.getLogger("translation_job_reports")
-        logger.addHandler(handler)
-        logger.setLevel(CDRTask.LOG_LEVELS.get(log_level, logging.INFO))
-        logger.propagate = False
-        logger.info("%s job started", self.mode)
-        return logger
 
     def run(self):
         "Generate and email the report."
+        self.logger.info("top of run, loading users")
         for user in self.load_users():
             user.send_report(self)
+        self.logger.info("job completed")
 
     def load_users(self):
         users = []
@@ -288,6 +264,7 @@ def main():
     """
 
     import argparse
+    import logging
     fc = argparse.ArgumentDefaultsHelpFormatter
     desc = "Report on CDR translation jobs"
     parser = argparse.ArgumentParser(description=desc, formatter_class=fc)
@@ -297,7 +274,8 @@ def main():
                         default="info", help="verbosity of logging")
     args = parser.parse_args()
     opts = dict([(k.replace("_", "-"), v) for k, v in args._get_kwargs()])
-    Control(opts).run()
+    logging.basicConfig(format=cdr.Logging.FORMAT, level=args.log_level.upper())
+    Control(opts, logging.getLogger()).run()
 
 if __name__ == "__main__":
     main()

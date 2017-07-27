@@ -1,5 +1,6 @@
 import logging
 from core.exceptions import TaskException
+import cdr
 import cdrdb2 as cdrdb
 
 class CDRTask(object):
@@ -7,15 +8,7 @@ class CDRTask(object):
     Base class for all tasks performed by a CDRJob subclass.
     """
 
-    LOG_LEVELS = {
-        "info": logging.INFO,
-        "debug": logging.DEBUG,
-        "warn": logging.WARN,
-        "warning": logging.WARNING,
-        "critical": logging.CRITICAL,
-        "error": logging.ERROR
-    }
-    "Map of log-level options to logging module constants."
+    LOGNAME = "cdr-scheduled-task"
 
     def __init__(self, jobParams, taskData):
         """
@@ -33,14 +26,16 @@ class CDRTask(object):
 
         self.jobParams = jobParams
         self.taskData = taskData
-        self.logger = CDRTask.get_logger(jobParams)
+        log_level = jobParams.get("log-level", "info")
+        self.logger = cdr.Logging.get_logger(self.LOGNAME, level=log_level)
 
     def Perform(self):
         """
         Performs the concrete task's work. Must be implmented in all
         CDRTask subclasses.
         """
-        raise NotImplementedError('The Perform() method must be implemented in all CDRTask subclasses.')
+        raise NotImplementedError("The Perform() method must be implemented "
+                                  "in all CDRTask subclasses.")
 
     def get_required_param(self, name):
         if name in self.jobParams:
@@ -53,13 +48,6 @@ class CDRTask(object):
             return self.jobParams[name]
         else:
             return default
-
-    @classmethod
-    def get_logger(cls, params):
-        log_level = params.get("log-level", "info")
-        logger = logging.getLogger(__name__)
-        logger.setLevel(cls.LOG_LEVELS.get(log_level, logging.INFO))
-        return logger
 
     @staticmethod
     def get_group_email_addresses(group_name):

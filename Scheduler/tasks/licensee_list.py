@@ -15,6 +15,8 @@ class ReportTask(CDRTask):
     Implements subclass for managing the monthly licensee report.
     """
 
+    LOGNAME = "licensees"
+
     def __init__(self, parms, data):
         """
         Initialize the base class then instantiate our Control object,
@@ -22,7 +24,7 @@ class ReportTask(CDRTask):
         """
 
         CDRTask.__init__(self, parms, data)
-        self.control = Control(parms)
+        self.control = Control(parms, self.logger)
 
     def Perform(self):
         "Hand off the real work to the Control object."
@@ -38,7 +40,6 @@ class Control:
     Class constants:
 
     TITLE           Name of the report
-    LOGFILE         We write our log entries here.
     REPORTS         Full set of reports to be run by default (in order).
     SENDER          First argument to cdr.sendMail().
     CHARSET         Encoding used by cdr.sendMail().
@@ -60,8 +61,6 @@ class Control:
     import lxml.html as HTML
     TITLE = "List of PDQ Content Distribution Partners"
     REPORT_DATE = datetime.date.today()
-    LOGFILE = "%s/licensees.log" % cdr.DEFAULT_LOGDIR
-    LOG_LEVELS = ("info", "debug", "error")
     MODES = ("test", "live")
     SENDER = "PDQ Operator <NCIPDQoperator@mail.nih.gov>"
     CHARSET = "ascii"
@@ -78,7 +77,7 @@ class Control:
         "doctype": "<!DOCTYPE html>"
     }
 
-    def __init__(self, options):
+    def __init__(self, options, logger):
         """
         Save the logger object and extract and validate the settings:
 
@@ -98,7 +97,7 @@ class Control:
         self.mode = options["mode"]
         self.skip_email = options.get("skip-email") or False
         self.test = self.mode == "test"
-        self.logger = cdr.Logging.get_logger("licensees")
+        self.logger = logger
         if self.mode not in self.MODES:
             raise TaskException("invalid mode %s" % repr(self.mode))
         self.cursor = cdrdb.connect("CdrGuest", as_dict=True).cursor()
@@ -400,6 +399,7 @@ if __name__ == "__main__":
     """
 
     import argparse
+    import logging
     fc = argparse.ArgumentDefaultsHelpFormatter
     desc = "Report on active licensees"
     parser = argparse.ArgumentParser(description=desc, formatter_class=fc)
@@ -407,8 +407,9 @@ if __name__ == "__main__":
                         help="controls who gets the report")
     parser.add_argument("--skip-email", action="store_true",
                         help="just write the report to the file system")
-    parser.add_argument("--log-level", choices=Control.LOG_LEVELS,
+    parser.add_argument("--log-level", choices=("info", "debug", "error"),
                         default="info", help="verbosity of logging")
     args = parser.parse_args()
     opts = dict([(k.replace("_", "-"), v) for k, v in args._get_kwargs()])
-    Control(opts).run()
+    logging.basicConfig(format=cdr.Logging.FORMAT, level=args.log_level.upper())
+    Control(opts, logging.getLogger()).run()
