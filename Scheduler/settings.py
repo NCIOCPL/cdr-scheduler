@@ -1,6 +1,8 @@
 """Settings to override default settings."""
 
 import logging
+import os
+import psutil
 from tornado.ioloop import PollIOLoop
 from tornado.platform.select import SelectIOLoop, _Select
 from util.cdr_connection_info import CDRDBConnectionInfo
@@ -47,8 +49,12 @@ DATABASE_CONFIG_DICT = {
 # method was completely replaced, with tons of debugging logging.
 #----------------------------------------------------------------------
 class CDRSelect(_Select):
+    process = psutil.Process(os.getpid())
     def poll(self, timeout):
-        logging.info("poll(%s seconds)", timeout)
+        mi = CDRSelect.process.memory_info()
+        logging.info("poll(%s seconds) rss=%d (%dMB) vms=%d (%dMB)", timeout,
+                     mi.rss, mi.rss/(1024*1024),
+                     mi.vms, mi.vms/(1024*1024))
         return _Select.poll(self, timeout)
 class CDRIOLoop(SelectIOLoop):
     def __init__(self):

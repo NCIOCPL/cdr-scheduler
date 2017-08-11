@@ -2,6 +2,8 @@
 Task to bounce the CDR services (also able to bounce other services,
 or just stop a service, as long as the account running the CDR
 scheduler has the right permissions).
+
+OCECDR-4266: remove support for retired publishing service
 """
 
 import time
@@ -38,11 +40,9 @@ class Control:
     Class constants:
 
     CDR_SERVICE   Display name for the CDR service
-    PUB_SERVICE   Display name for the CDR publishing service
     """
 
     CDR_SERVICE = "Cdr"
-    PUB_SERVICE = "cdrpublish2"
 
     def __init__(self, options):
         """
@@ -58,15 +58,8 @@ class Control:
         perform it. Otherwise, perform the default behavior of the
         following steps:
 
-            1. Stop the CDR Publishing service
-            2. Stop the CDR service
-            3. Start the CDR service
-            4. Start the CDR Publishing service
-
-        We do things in this order because the publishing service can
-        get into a confused state, in which it is unable to process
-        further requests, if the services on which it depends (including
-        the CDR service) are unavailable.
+            1. Stop the CDR service
+            2. Start the CDR service
         """
 
         # Make sure at most one custom action is requested.
@@ -89,10 +82,8 @@ class Control:
             return
 
         # Default behavior.
-        self.stop_service(self.PUB_SERVICE)
         self.stop_service(self.CDR_SERVICE)
         self.start_service(self.CDR_SERVICE)
-        self.start_service(self.PUB_SERVICE)
 
     def stop_service(self, name):
         """
