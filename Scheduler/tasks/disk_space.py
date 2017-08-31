@@ -59,7 +59,13 @@ class Monitor(CDRTask):
     def check(self):
         problems = []
         for tier in self.TIERS:
-            server = self.Server(tier)
+            try:
+                server = self.Server(tier)
+            except Exception as e:
+                self.logger.exception("failure checking %s", tier)
+                problem = "failure checking %s: %s" % (tier, e)
+                problems.append(problem)
+                continue
             for drive in sorted(server.free):
                 free = server.free[drive]
                 if free.bytes < self.thresholds[drive] * self.GB:
@@ -69,7 +75,7 @@ class Monitor(CDRTask):
                     self.logger.warning(problem)
                     problems.append(problem)
         if problems:
-            subject = "WARNING: LOW CDR DISK SPACE"
+            subject = "*** WARNING: CDR DISK SPACE CHECK ***"
             cdr.sendMail(self.FROM, self.recips, subject, "\n".join(problems))
             self.logger.info("sent alert to %s", ", ".join(self.recips))
         else:
