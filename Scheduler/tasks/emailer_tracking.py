@@ -141,7 +141,7 @@ class Mailer:
         logger.info("emailer_tracking job started")
 
         # Log into the CDR server with a local machine account.
-        session = cdr.login("etracker", "***REMOVED***")
+        session = cdr.login("etracker", cdr.getpw("etracker"))
 
         # Get the list of mailers from the emailer server.
         url = "%s/completed-gp.py" % cls.EMAILERSWEB

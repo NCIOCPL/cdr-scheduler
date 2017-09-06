@@ -40,8 +40,6 @@ class Control:
 
     EXTRA_ARGS = {
         "CG2Public.py": "--inputdir=Job%d",
-        "FtpExportData.py": "--jobid=%d",
-        "FtpOtherData.py": "--dir=Job%d"
     }
     "How we pass the job ID to some scripts (if we have one)."
 
@@ -103,15 +101,11 @@ class Control:
             documents which conform to the DTD used by all of our other
             data partners. Full weekly job only.
 
-        FTPExportData.py
+        sftp-export-data.py
             Copies the documents and supporting files to a separate
-            server from which they can be retrieved by our data partners.
+            directory, performs additional processing - creating auxilliary
+            files - and updates the FTP server using rsync.
             Full weekly job only.
-
-        FTPOtherData.py
-            Copies the NCICB terminology data to the same server as for
-            the previous step. Handled by a separate script because it
-            needs to be done nightly, not just on the weekend.
 
         Notify_VOL.py
             Notifies the Visuals OnLine (VOL) team when a media document
@@ -126,13 +120,14 @@ class Control:
         description = "%s%s" % (self.test and "test " or "", self.schedule)
         self.logger.info("%s publishing task started", description)
         self.notify("started")
+
         if not self.skip_publish_step:
             self.launch("SubmitPubJob.py", merge_output=True)
         if not self.publish_only:
             if self.schedule == "weekly":
                 self.launch("CG2Public.py")
-                self.launch("FTPExportData.py")
-            self.launch("FtpOtherData.py")
+                self.launch("sftp-export-data.py", include_runmode=False,
+                                                   include_pubmode=False)
             if self.schedule == "weekly":
                 self.launch("Notify_VOL.py", include_pubmode=False)
                 self.launch("CheckHotfixRemove.py", include_pubmode=False)
@@ -142,7 +137,7 @@ class Control:
     def notify(self, stage):
         self.logger.info("sending %s notification", repr(stage))
         subject = "%s publishing %s" % (self.schedule, stage)
-        message = "%s job %s successfully" % (self.schedule, stage)
+        message = "%s job %s successfully" % (self.schedule.title(), stage)
         self.send_mail(subject.title(), message)
 
     def quote_arg(self, arg):
@@ -195,7 +190,8 @@ class Control:
             return True
         return script == "SubmitPubJob.py" and "Failure" in result.output
 
-    def launch(self, script, include_pubmode=True, merge_output=False):
+    def launch(self, script, include_pubmode=True, merge_output=False,
+               include_runmode=True):
         """
         Execute the name Python script in a separate process and check
         to make sure it succeeded. If it didn't log and report the failure
@@ -211,7 +207,9 @@ class Control:
         """
 
         path = "%s/%s" % (self.PUBPATH, script)
-        command = "python %s --%smode" % (path, self.mode)
+        command = "python %s" % path
+        if include_runmode:
+            command += " --%s" % self.mode
         if include_pubmode:
             pubmode = (self.schedule == "weekly") and "export" or "interim"
             command += " --%s" % pubmode
@@ -250,5 +248,7 @@ if __name__ == "__main__":
                         default="info", help="verbosity of scheduler logging")
     args = parser.parse_args()
     opts = dict([(k.replace("_", "-"), v) for k, v in args._get_kwargs()])
-    logging.basicConfig(format=cdr.Logging.FORMAT, level=args.log_level.upper())
+
+    logging.basicConfig(format=cdr.Logging.FORMAT, 
+                        level=args.log_level.upper())
     Control(opts, logging.getLogger()).run()

@@ -165,7 +165,6 @@ class Control:
         else:
             group = "Licensee Report Notification"
         recips = CDRTask.get_group_email_addresses(group)
-        recips = ["***REMOVED***", "***REMOVED***"]
         title = "PDQ Distribution Partner List"
         subject = "%s-%s: %s" %(cdr.h.org, cdr.h.tier, title)
         cdr.sendMail(self.SENDER, recips, subject, report, html=True)

@@ -50,7 +50,7 @@ class CDRTask(object):
             return default
 
     @staticmethod
-    def get_group_email_addresses(group_name):
+    def get_group_email_addresses(group_name="Developers Notification"):
         """
         Replacement for cdr.getEmailList() which uses a DB API which
         does not do well in multi-threaded environments.
@@ -59,4 +59,5 @@ class CDRTask(object):
         query.join("grp_usr gu", "gu.usr = u.id")
         query.join("grp g", "g.id = gu.grp")
         query.where(query.Condition("g.name", group_name))
+        query.where("u.expired IS NULL")
         return [row[0] for row in query.execute().fetchall() if row[0]]
