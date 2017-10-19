@@ -732,7 +732,7 @@ SweepSpec: "%s"
         session = None
 
         # Need a connection to the CDR Server
-        session = cdr.login('FileSweeper', 'SnIxg$ZzBNbR')
+        session = cdr.login('FileSweeper', cdr.getpw('FileSweeper'))
         if not session:
             log("ERROR: FileSweeper login to CdrServer failed")
             # But no reason not to do the rest of the sweep
