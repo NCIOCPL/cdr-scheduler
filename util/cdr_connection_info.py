@@ -54,7 +54,7 @@ class CDRDBConnectionInfo:
                     if len(tokens) == 3:
                         tier, db, port = tokens
                         if db.lower() == "cdr":
-                            cls.PORTS[tier] = int(port)
+                            ports[tier] = int(port)
                 return ports
             except:
                 pass
