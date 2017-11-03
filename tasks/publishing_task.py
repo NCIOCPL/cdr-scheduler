@@ -154,10 +154,10 @@ class Control:
         If the email sending command fails, log the problem.
         """
 
-        path = "%s/PubEmail" % self.PUBPATH
+        path = "%s/PubEmail.py" % self.PUBPATH
         subject = self.quote_arg(subject)
         message = self.quote_arg(message)
-        command = "%s %s %s" % (path, subject, message)
+        command = "%s %s %s %s" % (cdr.PYTHON, path, subject, message)
         result = cdr.runCommand(command, joinErr2Out=False)
         if result.error:
             self.logger.error("sending email: %s", result.error)
