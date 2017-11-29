@@ -68,8 +68,6 @@ class Control:
         "english": "New/Changed English Summaries",
         "spanish": "New/Changed Spanish Summaries",
     }
-    DEFAULT_END = datetime.date.today()
-    DEFAULT_START = DEFAULT_END - datetime.timedelta(7)
     REPORTS = ["english", "spanish", "trials"]
     SENDER = "PDQ Operator <NCIPDQoperator@mail.nih.gov>"
     CHARSET = "iso-8859-1"
@@ -112,7 +110,11 @@ class Control:
             overrides the default end of the date range (today)
         """
 
+        self.TODAY = datetime.date.today()
+        self.DEFAULT_END = datetime.date.today()
+        self.DEFAULT_START = self.DEFAULT_END - datetime.timedelta(7)
         self.logger = logger
+        self.logger.info("====================================")
         self.reports = options.get("reports") or self.REPORTS
         self.mode = options["mode"]
         self.skip_email = options.get("skip-email", False)
