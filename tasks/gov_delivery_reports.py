@@ -70,7 +70,7 @@ class Control:
     }
     REPORTS = ["english", "spanish", "trials"]
     SENDER = "PDQ Operator <NCIPDQoperator@mail.nih.gov>"
-    CHARSET = "iso-8859-1"
+    CHARSET = "utf-8"
     TSTYLE = (
         "width: 80%",
         "border: 1px solid #999",
@@ -244,7 +244,7 @@ class Control:
         recips = CDRTask.get_group_email_addresses(group)
         if recips:
             subject = "%s-%s: %s" %(cdr.h.org, cdr.h.tier, self.title)
-            cdr.sendMail(self.SENDER, recips, subject, report, html=True)
+            cdr.sendMailMime(self.SENDER, recips, subject, report, "html")
             self.logger.info("sent %s", subject)
             self.logger.info("recips: %s", ", ".join(recips))
         else:
