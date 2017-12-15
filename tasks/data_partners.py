@@ -323,8 +323,8 @@ class Partner:
     EXPIRATION_THRESHOLD = str(TODAY - datetime.timedelta(100))
     WARNING_THRESHOLD = str(TODAY - datetime.timedelta(80))
     TYPE_STRINGS = { "T": "Test", "A": "Active", "S": "Special" }
-    HOST = cdr.h.host["APPC"]
-    UPDATE_URL = "https://%s.%s/cgi-bin/cdr/update-pdq-contact.py" % HOST
+    HOST = cdr.APPC
+    UPDATE_URL = "https://%s/cgi-bin/cdr/update-pdq-contact.py" % HOST
     DELAY = 3
 
     def __init__(self, control, node):
@@ -510,7 +510,7 @@ class Partner:
         Fetch the list of partners which have not already expired.
         """
 
-        url = "https://%s.%s/cgi-bin/cdr/get-pdq-contacts.py" % cls.HOST
+        url = "https://%s/cgi-bin/cdr/get-pdq-contacts.py" % cls.HOST
         url = "%s?p=%s" % (url, "TEST" if control.test else "CDR")
         control.logger.info("fetching partners from %r", url)
         root = etree.fromstring(requests.get(url).content)

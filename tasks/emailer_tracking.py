@@ -29,7 +29,7 @@ class Mailer:
     Object for a single mailer's document.
     """
 
-    EMAILERSWEB = "https://%s.%s/cgi-bin" % tuple(cdr.h.host["EMAILERSWEB"])
+    EMAILERSWEB = "https://%s/cgi-bin" % cdr.Tier().hosts["EMAILERSWEB"]
     "Base URL for this tier's emailer web server."
 
     XML_TO_STRING_OPTS = {
