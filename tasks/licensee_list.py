@@ -166,7 +166,7 @@ class Control:
             group = "Licensee Report Notification"
         recips = CDRTask.get_group_email_addresses(group)
         title = "PDQ Distribution Partner List"
-        subject = "%s-%s: %s" %(cdr.h.org, cdr.h.tier, title)
+        subject = "CBIIT-%s: %s" % (cdr.Tier().name, title)
         cdr.sendMail(self.SENDER, recips, subject, report, html=True)
         self.logger.info("sent %s", subject)
         self.logger.info("recips: %s", ", ".join(recips))

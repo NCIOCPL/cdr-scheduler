@@ -83,7 +83,8 @@ class Control:
         "encoding": CHARSET,
         "doctype": "<!DOCTYPE html>"
     }
-    CG = "%s.%s" % tuple(cdr.h.host['CG'])
+    TIER = cdr.Tier()
+    CG = TIER.hosts["CG"]
 
     def __init__(self, options, logger):
         """
@@ -243,7 +244,7 @@ class Control:
             }.get(self.key)
         recips = CDRTask.get_group_email_addresses(group)
         if recips:
-            subject = "%s-%s: %s" %(cdr.h.org, cdr.h.tier, self.title)
+            subject = "CBIIT-%s: %s" % (self.TIER.name, self.title)
             cdr.sendMailMime(self.SENDER, recips, subject, report, "html")
             self.logger.info("sent %s", subject)
             self.logger.info("recips: %s", ", ".join(recips))

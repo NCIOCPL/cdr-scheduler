@@ -22,17 +22,12 @@ class Sweeper(CDRTask):
 
         self.conn = cdrdb.connect()
         self.cursor = self.conn.cursor()
+        self.tier = cdr.Tier().name
         query = cdrdb.Query("pub_proc", "id", "completed")
         query.where("status = 'Verifying'")
         rows = query.order("id").execute(self.cursor).fetchall()
-        host = cdr2gk.host
         for job_id, completed in rows:
-            try:
-                self.verify_load(job_id, completed)
-                cdr2gk.host = host
-            except:
-                cdr2gk.host = host
-                raise
+            self.verify_load(job_id, completed)
         return TaskPropertyBag()
 
     def verify_load(self, job_id, completed):
@@ -43,14 +38,13 @@ class Sweeper(CDRTask):
         query = cdrdb.Query("pub_proc_parm", "parm_value")
         query.where(query.Condition("pub_proc", job_id))
         query.where("parm_name = 'GKServer'")
-        rows = query.execute(self.cursor).fetchall()
-        host = rows and rows[0][0] or ("%s.%s" % cdr.h.host["GK"])
-        cdr2gk.host = host
+        row = query.execute(self.cursor).fetchone()
+        host = row[0] if (row and row[0]) else cdr2gk.HOST
 
         # Talk to the GateKeeper SOAP status service.
-        self.logger.info("verifying push job %d to %s completed %s", job_id,
-                         host, completed)
-        response = cdr2gk.requestStatus("Summary", job_id)
+        args = job_id, host, completed
+        self.logger.info("verifying push job %d to %s completed %s", *args)
+        response = cdr2gk.requestStatus("Summary", job_id, host=host)
         details = response.details
         failures = []
         warnings = []
@@ -81,7 +75,7 @@ class Sweeper(CDRTask):
 
             # Notify the appropriate people of any problems found.
             if failures or warnings:
-                self.report_problems(job_id, failures, warnings)
+                self.report_problems(job_id, host, failures, warnings)
 
             # If every document failed the load, mark the status for the
             # entire job as Failure; however, if even 1 document was
@@ -117,9 +111,9 @@ class Sweeper(CDRTask):
                      WHERE id = %d""" % job_id)
                 self.conn.commit()
                 self.logger.error("job %d has stalled", job_id)
-                self.report_problems(job_id, stalled=True)
+                self.report_problems(job_id, host, stalled=True)
 
-    def report_problems(self, job_id, failures=None, warnings=None,
+    def report_problems(self, job_id, host, failures=None, warnings=None,
                         stalled=False):
         """Send out email notification of problems with a push job.
         """
@@ -127,7 +121,7 @@ class Sweeper(CDRTask):
         # Set the sender and recipients for the notification.
         sender = "cdr@%s" % cdr.CBIIT_NAMES[1]
         group = "Test PushVerificationAlerts"
-        if cdr.h.tier == "PROD":
+        if self.tier == "PROD":
             group = "PushVerificationAlerts"
         recips = self.get_group_email_addresses(group)
         if not recips:
@@ -139,7 +133,7 @@ class Sweeper(CDRTask):
 
         # We've waited too long for the push job to finish.
         if stalled:
-            subject = "CBIIT-%s: Push job %d stalled" % (cdr.h.tier, job_id)
+            subject = "CBIIT-%s: Push job %d stalled" % (self.tier, job_id)
             body = """\
 More than %d hours have elapsed since completion of the push of CDR
 documents for publishing job %d, and loading of the documents
@@ -149,7 +143,7 @@ has still not completed.
         # The job finished, but there were problems reported.
         else:
             subject = ("CBIIT-%s: Problems with loading of job %d "
-                       "to GateKeeper" % (cdr.h.tier, job_id))
+                       "to GateKeeper" % (self.tier, job_id))
             body = """\
 %d failures and %d warnings were encountered in the loading of documents
 for job %d to GateKeeper.
@@ -159,7 +153,7 @@ for job %d to GateKeeper.
         # in the job can be checked.
         url = ("%s/cgi-bin/cdr/GateKeeperStatus.py?"
                "jobId=%d&targetHost=%s&flavor=all" %
-               (cdr.CBIIT_NAMES[2], job_id, cdr2gk.host))
+               (cdr.CBIIT_NAMES[2], job_id, host))
 
         body += """
 Please visit the following link for further details:

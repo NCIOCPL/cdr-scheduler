@@ -134,7 +134,7 @@ class User:
         else:
             recips = [self.email]
         if recips:
-            subject = "%s-%s: %s" %(cdr.h.org, cdr.h.tier, control.title)
+            subject = "CBIIT-%s: %s" % (cdr.Tier().name, control.title)
             cdr.sendMail(self.SENDER, recips, subject, report, html=True)
             control.logger.info("sent %s", subject)
             control.logger.info("recips: %s", ", ".join(recips))
