@@ -242,11 +242,11 @@ class Control:
 
 class Partners:
     """
-    Set of all of the trials to be shown on this report.
+    Set of all of the PDQ data partners to be shown on this report.
 
         control   Object which has wrappers for using the lxml package's
                   factory methods to generate HTML elements.
-        trials    Ordered sequence of Trial objects.
+        trials    Ordered sequence of Partner objects.
     """
 
     INFO = "/Licensee/LicenseeInformation"
