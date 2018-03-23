@@ -944,6 +944,9 @@ def loadConfigFile(fileName):
     """
     Load the configuration file.
 
+    Change in Hawking release: pull configuration from the repository
+    if possible, otherwise fall back on disk file.
+
     Pass:
         Path to config file.
 
@@ -956,11 +959,42 @@ def loadConfigFile(fileName):
         Unable to parse file.
         File contents invalid.
     """
-    # Parse file from disk
-    try:
-        dom = xml.dom.minidom.parse(fileName)
-    except Exception, info:
-        fatalError("Error loading config file %s: %s" % (fileName, info))
+
+    # Pull the file from the repository if available there
+    cursor = cdrdb.connect("CdrGuest").cursor()
+    cursor.execute("""\
+        SELECT v.id, MAX(v.num)
+          FROM doc_version v
+          JOIN doc_type t
+            ON t.id = v.doc_type
+         WHERE t.name = 'SweepSpecifications'
+           AND v.val_status = 'V'
+      GROUP BY v.id""")
+    rows = cursor.fetchall()
+    if len(rows) > 1:
+        fatalError("More than on SweepSpecifications document found")
+    elif len(rows) == 1:
+        doc_id, version = rows[0]
+        query = cdrdb.Query("doc_version", "xml")
+        query.where(query.Condition("id", doc_id))
+        query.where(query.Condition("num", version))
+        row = query.execute(cursor).fetchone()
+        try:
+            dom = xml.dom.minidom.parseString(row[0].encode("utf-8"))
+            args = doc_id, version
+            log("loaded config from CDR{:d} version {:d}".format(*args))
+        except Exception as e:
+            msg = "Failure parsing config document CDR{:d} version {:d}: {}"
+            args = doc_id, version, e
+            fatalError(msg.format(*args))
+
+    # Otherwise, parse file from disk (temporary fallback)
+    else:
+        try:
+            dom = xml.dom.minidom.parse(fileName)
+            log("loaded config from {}".format(fileName))
+        except Exception, info:
+            fatalError("Error loading config file %s: %s" % (fileName, info))
 
     # List of loaded specifications
     spec = []

@@ -112,8 +112,8 @@ class Control:
         """
 
         self.TODAY = datetime.date.today()
-        self.DEFAULT_END = datetime.date.today()
-        self.DEFAULT_START = self.DEFAULT_END - datetime.timedelta(7)
+        self.DEFAULT_END = self.TODAY - datetime.timedelta(1)
+        self.DEFAULT_START = self.TODAY - datetime.timedelta(7)
         self.logger = logger
         self.logger.info("====================================")
         self.reports = options.get("reports") or self.REPORTS
