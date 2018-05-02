@@ -1,25 +1,8 @@
 """
 Scheduled tasks related to PQD data partners.
 
-There are basically two paths for testing this task without sending
-email messages to any real outside partners.
-
-The first approach is to set the `mode` flag to "test" and populate
-the data partner database tables with partner records whose `product`
-is "TEST" and whose contact email addresses belong to internal
-staff (typically developers or testers). (Be careful not to be
-confused by the overloaded word "TEST" in the partner records.
-There is also a "TEST" status for outside partners who are trying
-the system out. In hindsight, perhaps "PROVISIONAL" would have
-been a better name for that status so it wouldn't be so easy to
-mix up with the "TEST" product we're using here.) The upper tiers
-often have no partner records with a "TEST" status, which means
-that when the DEV (or QA) tier is refreshed from PROD, such records
-will have to be re-created.
-
-The other way to test is to run the task on a non-production tier,
-with the `mode` flag set to "live"; this will cause the email messages
-to be sent to the members of the "Test Publishing Notification"
+When this job is run on a non-production tier, the email messages
+will be sent to the members of the "Test Publishing Notification"
 CDR group instead of the outside partners' email addresses.
 """
 
@@ -33,12 +16,15 @@ import lxml.html as html
 import lxml.html.builder as B
 import requests
 import cdr
-import cdrdb2 as cdrdb
 import settings
 from cdrutil import sendMail
 from cdr_task_base import CDRTask
 from core.exceptions import TaskException
 from task_property_bag import TaskPropertyBag
+from cdrapi.users import Session
+from cdrapi import db
+from cdrapi.docs import Doc
+
 
 class Notify(CDRTask):
     """
@@ -52,20 +38,23 @@ class Notify(CDRTask):
     DELAY = 5
     MODES = "test", "live"
 
+    test_recips = None
+
     def __init__(self, parms, data):
         """
         Create a logger, connect to the DB, and check the options.
 
         mode
-            must be "test" or "live" (required); test mode restricts
-            recipient list for report
+            must be "test" or "live" (required)
         log-level
             optional logging level; defaults to "info"
         superlog
-            if true, log full email messages (only effective if level
+            if true, log full email messages (only effective if log-level
             is set to "debug")
 
         Attributes:
+          conn - reference to database connection object
+          cursor - reference to database cursor for connection
           logger - object for recording what we do
           test - flag indicating whether this is a test run
           ops - list of email addresses for notifying NCI staff
@@ -73,13 +62,18 @@ class Notify(CDRTask):
         """
 
         CDRTask.__init__(self, parms, data)
+        opts = dict(password=cdr.getpw("pdqcontent"))
+        self.session = Session.create_session("pdqcontent", **opts)
+        self.conn = db.connect()
+        self.cursor = self.conn.cursor()
         self.log_messages = parms.get("superlog") and True or False
         mode = parms.get("mode")
         if mode not in self.MODES:
             self.logger.error("invalid mode %r", mode)
             raise Exception("invalid or missing mode")
         self.test = parms.get("mode") != "live"
-        self.job = self.Job(self.logger, parms.get("job"), self.test)
+        args = self.cursor, self.logger, parms.get("job"), self.test
+        self.job = self.Job(*args)
         self.ops = self.get_group_email_addresses("PDQ Partner Notification")
 
     def Perform(self):
@@ -91,15 +85,16 @@ class Notify(CDRTask):
         expiration dates will also get warnings about the upcoming
         expiration. Test accounts which have passed their expiration dates
         will only get a notification that their accounts have expired.
-        The database table for the data partners will be updated to
-        reflect dates of notification and expiration.
+        The database table for the notification will be updated to
+        reflect dates of notification. Expiration of a test account
+        will result in a modification of the Licensee document.
 
         The actual disabling of login access to the sFTP server is a
         separate step handled by CBIIT at our request.
         """
 
-        for partner in Partner.get_partners(self):
-            partner.process()
+        for contact in Contact.get_contacts(self):
+            contact.process()
         self.report()
         self.logger.info("notification job complete")
         return TaskPropertyBag()
@@ -125,15 +120,12 @@ class Notify(CDRTask):
         of addresses when we are sending internal messages reporting
         processing to the operators, and will always be a single
         string when sending the notification to an individual data
-        partner. This is why the checks which prevent sending out
-        email messages to outside data partners from non-production
-        tiers works correctly (note also that if the `test` property
-        is set, the email addresses will come from partner records
-        which should have internal email addresses; see the notes
-        at the top of this file).
+        partner contact. This is why the checks which prevent sending
+        out email messages to outside data partners from non-production
+        tiers works correctly.
 
         Pass:
-            recips - string (for data partner) or list of strings (for ops)
+            recips - string (for partner contact) or list of strings (for ops)
             subject - string for message's subject header
             message - string for message body
 
@@ -142,10 +134,12 @@ class Notify(CDRTask):
         """
 
         if isinstance(recips, basestring):
-            if not cdr.isProdHost() and not self.test:
+            if not cdr.isProdHost() or self.test:
                 extra = u"In live prod mode, would have gone to %r" % recips
-                group = "Test Publishing Notification"
-                recips = self.get_group_email_addresses(group)
+                if Notify.test_recips is None:
+                    group = "Test Publishing Notification"
+                    Notify.test_recips = self.get_group_email_addresses(group)
+                recips = Notify.test_recips
                 self.logger.info("using recips: %r", recips)
                 message = u"<h3>%s</h3>\n%s" % (cgi.escape(extra), message)
             else:
@@ -168,6 +162,7 @@ class Notify(CDRTask):
                 time.sleep(delay)
                 delay += self.DELAY
 
+
     class Job:
         """
         Information about the export job for which we send notifications.
@@ -185,13 +180,13 @@ class Notify(CDRTask):
                           to be mailed to the operator(s)
         """
 
-        def __init__(self, logger, job_id=None, test=False):
+        def __init__(self, cursor, logger, job_id=None, test=False):
             """
             Collect the attributes of the job for which we send notifications.
             """
 
             self.logger = logger
-            query = cdrdb.Query("pub_proc", "id", "started")
+            query = db.Query("pub_proc", "id", "started")
             if job_id:
                 query.where(query.Condition("id", job_id))
             else:
@@ -199,7 +194,7 @@ class Notify(CDRTask):
                 query.where("status = 'Success'")
                 query.order("id DESC")
                 query.limit(1)
-            row = query.execute().fetchone()
+            row = query.execute(cursor).fetchone()
             logger.info("notifications for job %d started %s", row[0], row[1])
             self.id, self.started = row
             values = cdr.BASEDIR, self.id
@@ -225,11 +220,10 @@ class Notify(CDRTask):
             if not os.path.isfile(path):
                 self.logger.debug("creating %r", path)
                 style = "text-align: center; background: #365f91; color: white"
-                product = "TEST" if test else "CDR"
-                top = " Memo submitted to %s Vendors " % product
+                top = "Test Vendor Memo" if test else "Vendor Memo"
                 header = "Notification sent to the following vendors"
                 with open(path, "w") as fp:
-                    fp.write('<h2 style="%s">%s</h2>\n' % (style, top))
+                    fp.write('<h2 style="%s"> %s </h2>\n' % (style, top))
                     fp.write("%s\n" % self.message)
                     fp.write('<h2 style="%s">End Vendor Memo</h2>\n' % style)
                     fp.write("<h3>%s</h3>\n<ul>\n" % header)
@@ -267,7 +261,7 @@ class Notify(CDRTask):
             """
             Create a formatted report summarizing deltas from last week's job.
 
-            The values for the report are drawn from the colon-delimited records
+            Values for the report are drawn from the colon-delimited records
             in the YYYYMM.changes file written to the job's vendor output
             directory.
             """
@@ -290,9 +284,10 @@ class Notify(CDRTask):
                 row.append(B.TD(count, style="text-align: right;"))
             return html.tostring(table)
 
-class Partner:
+
+class Contact:
     """
-    Information about a single PDQ data partner.
+    Information about a contact for one of the PDQ data partners.
 
     Test accounts are temporary. We advertise such accounts as having a
     three-month duration, though we actually give them 100 days before
@@ -303,13 +298,12 @@ class Partner:
         control - reference to the top-level object managing the job
         logger - object for logging processing activity and errors
         job - reference to object for the job we're sending notifications for
-        contact_id - primary key for the individual to whom we send email
         email - address for the notification
         person - name of the person with whom we are corresponding
         org - name of the organization for the account
         org_id - primary key for the account's organization
         type - code for the type of account (e.g., A (Active))
-        type_string - see Partner.TYPE_STRINGS
+        type_string - see Contact.TYPE_STRINGS
         activated - when the account was first activated
         renewed - when the account was renewed (optional)
         notified - when the account last received notification
@@ -324,12 +318,14 @@ class Partner:
     WARNING_THRESHOLD = str(TODAY - datetime.timedelta(80))
     TYPE_STRINGS = { "T": "Test", "A": "Active", "S": "Special" }
     HOST = cdr.APPC
-    UPDATE_URL = "https://%s/cgi-bin/cdr/update-pdq-contact.py" % HOST
     DELAY = 3
+    TABLE = "data_partner_notification"
+    COLS = "email_addr, notif_date"
+    INSERT = "INSERT INTO {} ({}) VALUES (?, GETDATE())".format(TABLE, COLS)
 
     def __init__(self, control, node):
         """
-        Extract the partner information from the XML node.
+        Extract the partner/contact information from the XML node.
 
         Also determine whether the partner's account (if it is
         a temporary, test account) has expired (or is about to
@@ -401,9 +397,6 @@ class Partner:
         We also append a line to the summary report to be sent to
         the operators, and we update the contact's database record
         to record that the notification has been sent.
-
-        XXX Ask Volker about instructions which describe logging
-        in to sFTP server with a password (instead of using SSH keys).
         """
 
         summary = u"%s: %s" % (self.type_string, self.display)
@@ -412,7 +405,8 @@ class Partner:
         self.logger.info("notifying %s", self.display)
         self.report(summary)
         self.send(self.job.subject, self.job.message)
-        self.update("notified", self.contact_id)
+        self.control.cursor.execute(self.INSERT, self.email.lower().strip())
+        self.control.conn.commit()
 
     def warn(self):
         """
@@ -441,7 +435,7 @@ class Partner:
 
         Also, add a line to the summary report to be sent to the operators,
         and send a separate message immediately to the operators, containing
-        the warning message we just sent to the data partner.
+        the termination message we just sent to the data partner.
 
         N.B.: If processing fails between the step to send the expiration
         notice and the actual expiration itself, the partner will get a
@@ -455,8 +449,53 @@ class Partner:
         subject = u"%s, %s" % (subject, self.job.date_and_week())
         message = cdr.getControlValue("Publishing", "test-partner-disabled")
         self.send(subject, message)
-        self.update("expired", self.org_id)
+        self.expire()
         self.notify_ops(subject, message)
+
+    def expire(self):
+        """
+        Update data partner's CDR document to reflect deactivation.
+        """
+
+        doc = Doc(self.control.session, id=self.org_id)
+        root = doc.root
+        node = root.find("LicenseeInformation/LicenseeStatus")
+        if node.text == "Test-inactive":
+            self.logger.warning("CDR%s already deactivated", self.org_id)
+            return
+        self.logger.info("Marking CDR%s as expired", self.org_id)
+        node.text = "Test-inactive"
+        today = str(datetime.date.today())
+        node = root.find("DateLastModified")
+        if node is None:
+            node = etree.SubElement(root, "DateLastModified")
+        node.text = today
+        node = root.find("LicenseeInformation/LicenseeStatusDates")
+        if node is None:
+            message = "CDR%s missing LicenseeStatusDates"
+            self.logger.warning(message, self.org_id)
+        else:
+            child = node.find("TestInactivation")
+            if child is None:
+                child = etree.Element("TestInactivation")
+                sibling = node.find("TestActivation")
+                if sibling is not None:
+                    sibling.addnext(child)
+                else:
+                    node.insert(0, child)
+            if child.text is None or not child.text.strip():
+                child.text = today
+        comment = "Marking account as inactive"
+        doc.check_out(force=True, comment=comment)
+        doc.save(version=True, reason=comment, comment=comment, unlock=True)
+
+    def send(self, subject, message):
+        """
+        Send an email message to the data partner's contact.
+        """
+
+        recip = u"%s <%s>" % (self.person, self.email)
+        self.control.send(recip, subject, message)
 
     def report(self, line):
         """
@@ -468,55 +507,29 @@ class Partner:
         with open(self.control.job.report_path, "a") as fp:
             fp.write("<li>%s</li>\n" % cgi.escape(line))
 
-    def update(self, action, id):
-        """
-        Update data partner's DB records to reflect notification/deactivation.
-
-        Note: logically, we should be using the PUT verb, but either IIS
-        is refusing to accept PUT requests, or the CGI module is not handling
-        them properly. So we use a GET request instead.
-
-        Pass:
-            action - "notified" or "expired"
-            id - primary key for record to be updated
-        """
-
-        url = "%s?action=%s&id=%s" % (self.UPDATE_URL, action, id)
-        result = requests.get(url).text
-        self.logger.info("%s: %s", url, result.strip())
-
-    def send(self, subject, message):
-        """
-        Send an email message to this data partner's contact.
-        """
-
-        recip = u"%s <%s>" % (self.person, self.email)
-        self.control.send(recip, subject, message)
-
     def notify_ops(self, subject, message):
         """
         Send an copy of a warning or expiration message to the operators.
         """
 
-        partner = cgi.escape(self.display)
-        lead = u"The following message was sent to %s" % partner
+        contact = cgi.escape(self.display)
+        lead = u"The following message was sent to %s" % contact
         message = u"<p><i>%s</i></p>%s" % (lead, message)
         self.control.send(self.control.ops, subject, message)
         self.logger.debug("copied ops on %r", subject)
 
     @classmethod
-    def get_partners(cls, control):
+    def get_contacts(cls, control):
         """
-        Fetch the list of partners which have not already expired.
+        Fetch the list of contacts for partners which have not already expired.
         """
 
         url = "https://%s/cgi-bin/cdr/get-pdq-contacts.py" % cls.HOST
-        url = "%s?p=%s" % (url, "TEST" if control.test else "CDR")
-        control.logger.info("fetching partners from %r", url)
+        control.logger.info("fetching contacts from %r", url)
         root = etree.fromstring(requests.get(url).content)
-        partners = [cls(control, node) for node in root.findall("contact")]
-        control.logger.info("%d partners fetched", len(partners))
-        return partners
+        contacts = [cls(control, node) for node in root.findall("contact")]
+        control.logger.info("%d contacts fetched", len(contacts))
+        return contacts
 
 if __name__ == "__main__":
     import argparse

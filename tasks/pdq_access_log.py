@@ -43,7 +43,8 @@ class Report(CDRTask):
     DELAY = 5
     WIDTHS = 15, 50, 40, 10, 10, 10
     LABELS = "Login", "Partner", "Path", "Session", "Date", "Time"
-    NON_PARTNERS = set(cdr.getControlValue("PDQ", "non-partners").split(","))
+    NON_PARTNERS = set(cdr.getControlValue("PDQ",
+                                           "non-partners", "").split(","))
 
     def __init__(self, parms, data):
         """
