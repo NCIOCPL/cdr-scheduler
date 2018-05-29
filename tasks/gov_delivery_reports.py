@@ -244,7 +244,7 @@ class Control:
             }.get(self.key)
         recips = CDRTask.get_group_email_addresses(group)
         if recips:
-            subject = "CBIIT-%s: %s" % (self.TIER.name, self.title)
+            subject = "[%s] %s" % (self.TIER.name, self.title)
             cdr.sendMailMime(self.SENDER, recips, subject, report, "html")
             self.logger.info("sent %s", subject)
             self.logger.info("recips: %s", ", ".join(recips))

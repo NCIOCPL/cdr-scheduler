@@ -133,7 +133,7 @@ class Sweeper(CDRTask):
 
         # We've waited too long for the push job to finish.
         if stalled:
-            subject = "CBIIT-%s: Push job %d stalled" % (self.tier, job_id)
+            subject = "[%s] Push job %d stalled" % (self.tier, job_id)
             body = """\
 More than %d hours have elapsed since completion of the push of CDR
 documents for publishing job %d, and loading of the documents
@@ -142,7 +142,7 @@ has still not completed.
 
         # The job finished, but there were problems reported.
         else:
-            subject = ("CBIIT-%s: Problems with loading of job %d "
+            subject = ("[%s] Problems with loading of job %d "
                        "to GateKeeper" % (self.tier, job_id))
             body = """\
 %d failures and %d warnings were encountered in the loading of documents
