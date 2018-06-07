@@ -166,6 +166,8 @@ class Report(CDRTask):
                 """
 
                 tokens = line.split()
+                if tokens[0].isdigit():
+                    tokens = tokens[1:]
                 self.date = "%s-%s" % (tokens[0], ("0" + tokens[1])[-2:])
                 self.time = tokens[2]
                 self.path = tokens[6][1:-1].replace("/pdq/full/", "")
@@ -192,6 +194,8 @@ class Report(CDRTask):
                     count += 1
                 elif "session opened for local user" in line:
                     tokens = line.split()
+                    if tokens[0].isdigit():
+                        tokens = tokens[1:]
                     sid = int(tokens[4][5:-2])
                     user = tokens[10]
                     sids[sid] = user
