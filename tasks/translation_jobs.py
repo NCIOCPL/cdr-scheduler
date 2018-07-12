@@ -433,7 +433,6 @@ class User(ReportTools):
             recips = CDRTask.get_group_email_addresses(group)
         else:
             recips = [self.email]
-        recips = ["bkline@rksystems.com"]
         if recips:
             subject = "[%s] %s" % (cdr.Tier().name, control.title)
             cdr.sendMail(self.SENDER, recips, subject, report, html=True)
