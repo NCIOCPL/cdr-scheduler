@@ -7,6 +7,7 @@ from cdr_task_base import CDRTask
 from core.exceptions import TaskException
 from task_property_bag import TaskPropertyBag
 import datetime
+import requests
 import cdr
 import cdrdb2 as cdrdb
 
@@ -61,7 +62,7 @@ class Control:
     import lxml.html as HTML
     TITLE = "List of PDQ Content Distribution Partners"
     REPORT_DATE = datetime.date.today()
-    MODES = ("test", "live")
+    MODES = "test", "live"
     SENDER = "PDQ Operator <NCIPDQoperator@mail.nih.gov>"
     CHARSET = "ascii"
     TSTYLE = (
@@ -166,7 +167,7 @@ class Control:
             group = "Licensee Report Notification"
         recips = CDRTask.get_group_email_addresses(group)
         title = "PDQ Distribution Partner List"
-        subject = "CBIIT-%s: %s" % (cdr.Tier().name, title)
+        subject = "[%s] %s" % (cdr.Tier().name, title)
         cdr.sendMail(self.SENDER, recips, subject, report, html=True)
         self.logger.info("sent %s", subject)
         self.logger.info("recips: %s", ", ".join(recips))
@@ -258,6 +259,7 @@ class Partners:
     TEST_END = "%s/TestInactivation" % DATES
     PROD_START = "%s/ProductionActivation" % DATES
     PROD_END = "%s/ProductionInactivation" % DATES
+    USER_NAME = "/Licensee/FtpInformation/UserName"
     test_count = 0
     prod_count = 0
 
@@ -266,13 +268,23 @@ class Partners:
         Collect the Partner document objects.
         """
 
+        # Fetch information about when each account last fetched data.
+        url = ("https://cdr-dev.cancer.gov"
+               "/cgi-bin/cdr/last-pdq-data-partner-accesses.py")
+        control.logger.info("fetching contacts from %r", url)
+        self.last_access = dict()
+        for line in requests.get(url).text.splitlines():
+            fields = line.split()
+            self.last_access[fields[0]] = fields[1]
+
         # Create the database query to fetch the licensee information.
         cols = ("n.doc_id", "n.value AS name", "s.value AS status",
                 "ta.value AS test_activation",
                 "te.value AS test_extension",
                 "ti.value AS test_inactivation",
                 "pa.value AS prod_activation",
-                "pi.value AS prod_inactivation")
+                "pi.value AS prod_inactivation",
+                "un.value AS user_name")
         query = cdrdb.Query("query_term n", *cols)
 
         # Get the licensee's name.
@@ -303,13 +315,17 @@ class Partners:
         query.outer("query_term pi", "pi.doc_id = n.doc_id",
                     "pi.path = '%s'" % self.PROD_END)
 
+        # What is the SFTP user account name?
+        query.outer("query_term un", "un.doc_id = n.doc_id",
+                    "un.path = '%s'" % self.USER_NAME)
+
         # Order the licensees by name, grouped by status.
         query.order("s.value", "n.value")
 
         # Collect and save the Partner objects.
         control.logger.debug("database query:\n%s", query)
         rows = [row for row in query.execute(control.cursor, timeout=300)]
-        self.licensees = [Partner(row) for row in rows]
+        self.licensees = [Partner(self, row) for row in rows]
 
     def table(self):
         """
@@ -338,7 +354,8 @@ class Partners:
             Control.th("Test Renewed"),
             Control.th("Test Removed"),
             Control.th("Prod Started"),
-            Control.th("Prod Removed")
+            Control.th("Prod Removed"),
+            Control.th("Last Access")
         )
 
 class Partner:
@@ -355,7 +372,7 @@ class Partner:
         prod_inactivation   date the production period ended
     """
 
-    def __init__(self, values):
+    def __init__(self, partners, values):
         """
         Collect all of the properties for a single PDQ data partner.
         Because we've told our connection object to return dictionaries
@@ -372,6 +389,9 @@ class Partner:
             Partners.prod_count += 1
         else:
             Partners.test_count += 1
+        self.last_access = None
+        if self.user_name:
+            self.last_access = partners.last_access.get(self.user_name.lower())
 
     def row(self):
         """
@@ -387,7 +407,8 @@ class Partner:
             Control.td(self.test_extension, white_space="nowrap"),
             Control.td(self.test_inactivation, white_space="nowrap"),
             Control.td(self.prod_activation, white_space="nowrap"),
-            Control.td(self.prod_inactivation, white_space="nowrap")
+            Control.td(self.prod_inactivation, white_space="nowrap"),
+            Control.td(self.last_access, white_space="nowrap")
         )
 
 if __name__ == "__main__":
