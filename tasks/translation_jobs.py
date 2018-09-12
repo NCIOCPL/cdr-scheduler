@@ -108,6 +108,7 @@ class ReportTools:
         html       Tree object created using lxml HTML builder.
         """
 
+        cls.TO_STRING_OPTS = {"encoding": "unicode"}
         return cls.HTML.tostring(html, **cls.TO_STRING_OPTS)
 
     @staticmethod
@@ -168,7 +169,7 @@ class Control(ReportTools):
 
     def run(self):
         "Generate and email the report."
-        self.logger.info("top of %s %s run", self.schedule, self.doctype)
+        self.logger.info("*** top of %s %s run", self.schedule, self.doctype)
         if self.schedule == "nightly":
             self.logger.info("loading users")
             for user in self.load_users():
@@ -363,7 +364,8 @@ class Control(ReportTools):
         recips = CDRTask.get_group_email_addresses(group)
         if recips:
             subject = "[%s] %s" % (cdr.Tier().name, self.title)
-            cdr.sendMail(self.SENDER, recips, subject, report, html=True)
+            #cdr.sendMail(self.SENDER, recips, subject, report, html=True)
+            cdr.sendMailMime(self.SENDER, recips, subject, report, "html")
             self.logger.info("sent %s", subject)
             self.logger.info("recips: %s", ", ".join(recips))
         else:
@@ -435,7 +437,9 @@ class User(ReportTools):
             recips = [self.email]
         if recips:
             subject = "[%s] %s" % (cdr.Tier().name, control.title)
-            cdr.sendMail(self.SENDER, recips, subject, report, html=True)
+            #cdr.sendMail(self.SENDER, recips, subject, report, html=True)
+            cdr.sendMailMime(self.SENDER, recips, subject, report, "html")
+
             control.logger.info("sent %s", subject)
             control.logger.info("recips: %s", ", ".join(recips))
         else:
