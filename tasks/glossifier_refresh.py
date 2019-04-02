@@ -114,7 +114,8 @@ class Terms:
             recips = CDRTask.get_group_email_addresses(group)
             if not recips:
                 raise Exception("no recips found for glossary failure message")
-            subject = "Failure sending glossary information"
+            tier = self.tier.name
+            subject = "[{}] Failure sending glossary information".format(tier)
             lines = []
             for args in failures:
                 lines.append(u"Server {!r} at {}: {}".format(*args))
