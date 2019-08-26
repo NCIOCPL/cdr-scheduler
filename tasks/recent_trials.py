@@ -226,7 +226,7 @@ class Trial:
         self.title = self.get_text(root.find("brief_title"))
         if not self.title:
             self.title = self.get_text(root.findall("official_title"))
-        value = self.get_text(root.find("firstreceived_date"))
+        value = self.get_text(root.find("study_first_submitted"))
         if value:
             dt = datetime.datetime.strptime(value, "%B %d, %Y")
             self.first_received = dt.date()
