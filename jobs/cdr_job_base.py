@@ -52,7 +52,7 @@ if __name__ == "__main__":
     job = CDRJob.create_test_instance()
     try:
         job.run({})
-        print 'This was expected to fail but did not.'
+        print('This was expected to fail but did not.')
     except NotImplementedError:
-        print 'Failed in the expected manner.'
+        print('Failed in the expected manner.')
     pass

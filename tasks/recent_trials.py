@@ -83,7 +83,7 @@ class Control:
         try:
             if self.fetch():
                 self.record()
-        except Exception, e:
+        except Exception as e:
             self.logger.exception("failed")
             raise TaskException("failed: %s" % e)
 
@@ -120,7 +120,7 @@ class Control:
             if not bytes:
                 self.logger.warn("empty response (no trials?)")
                 return False
-        except Exception, e:
+        except Exception as e:
             error = "Failure downloading trial set using %s: %s" % (url, e)
             raise Exception(error)
 
@@ -168,7 +168,7 @@ INSERT INTO ctgov_trial_sponsor (nct_id, position, sponsor)
                         position += 1
                     self.conn.commit()
                     loaded += 1
-            except Exception, e:
+            except Exception as e:
                 self.logger.error("%s: %s", name, e)
         self.logger.info("processed %d trials, %d new", len(names), loaded)
 

@@ -437,7 +437,7 @@ SweepSpec: "%s"
         # Create the output compressed tar archive
         try:
             tar = tarfile.open(self.outFile, "w:bz2")
-        except Exception, info:
+        except Exception as info:
             fatalError('Could not open tarfile "%s" for writing'
                         % self.outFile)
 
@@ -446,7 +446,7 @@ SweepSpec: "%s"
             # Archive it
             try:
                 tar.add(fobj.fileName)
-            except Exception, info:
+            except Exception as info:
                 self.addMsg("Tar error (1): %s" % info)
                 self.addMsg("FileName: %s" % fobj.fileName)
                 self.addMsg("Abandoning this SweepSpec")
@@ -457,7 +457,7 @@ SweepSpec: "%s"
 
         try:
             tar.close()
-        except Exception, info:
+        except Exception as info:
             fatalError('Could not close tarfile "%s"' % self.outFile)
 
         # If here, everything okay, deletion can proceed
@@ -506,7 +506,7 @@ SweepSpec: "%s"
         if self.action == "TruncateArchive":
             try:
                 tar = tarfile.open(self.outFile, "w:bz2")
-            except Exception, info:
+            except Exception as info:
                 fatalError('Could not open tarfile "%s" for writing'
                             % self.outFile)
 
@@ -543,7 +543,7 @@ SweepSpec: "%s"
                         done = True
                 destp.close()
                 srcp.close()
-            except Exception, info:
+            except Exception as info:
                 self.addMsg(
 """WARNING: Unable to create truncation of "%s::%s":
    %s
@@ -571,7 +571,7 @@ SweepSpec: "%s"
                         srcp = open(inFile, "ab+")
                         srcp.truncate(truncPoint)
                         srcp.close()
-                    except Exception, info:
+                    except Exception as info:
                         self.addMsg('Unable to truncate "%s::%s": %s' %
                                      (self.specName, inFile, info))
                         continue
@@ -590,7 +590,7 @@ SweepSpec: "%s"
                 # Archive the truncation
                 try:
                     tar.add(inFile)
-                except Exception, info:
+                except Exception as info:
                     self.addMsg("Tar error: %s" % info)
                     self.addMsg("Abandoning this SweepSpec")
 
@@ -599,7 +599,7 @@ SweepSpec: "%s"
             if not testMode:
                 try:
                     shutil.move(tmpFile, inFile)
-                except Exception, info:
+                except Exception as info:
                     fatalError('Unable to replace original file "%s":\n   %s'
                                     % (inFile, info))
 
@@ -610,7 +610,7 @@ SweepSpec: "%s"
         if self.action == "TruncateArchive":
             try:
                 tar.close()
-            except Exception, info:
+            except Exception as info:
                 fatalError('Could not close tarfile "%s"' % self.outFile)
 
     #----------------------------------------------------------------------
@@ -640,7 +640,7 @@ SweepSpec: "%s"
                 else:
                     self.addMsg('Test mode, not deleting "%s"' %
                                  fileObj.fileName)
-            except Exception, info:
+            except Exception as info:
                 if nameIsDir:
                     self.addMsg("Error removing directory %s: %s" %
                                 (fileObj.fileName, info))
@@ -993,7 +993,7 @@ def loadConfigFile(fileName):
         try:
             dom = xml.dom.minidom.parse(fileName)
             log("loaded config from {}".format(fileName))
-        except Exception, info:
+        except Exception as info:
             fatalError("Error loading config file %s: %s" % (fileName, info))
 
     # List of loaded specifications
@@ -1260,7 +1260,7 @@ remove the file "%s" to enable FileSweeper to run.
             # Try to make it
             try:
                 os.makedirs(outputDir)
-            except Exception, info:
+            except Exception as info:
                 fatalError(
                   """Directory "%s" does not exist, can't create it: %s"""
                   % (outputDir, info))
@@ -1291,7 +1291,7 @@ remove the file "%s" to enable FileSweeper to run.
                 # Change to input file root directory
                 try:
                     os.chdir(spec.root)
-                except Exception, info:
+                except Exception as info:
                     spec.addMsg("Unable to cd to root: %s" % info)
                     spec.addMsg('"%s" not processed' % spec.specName)
                     continue
@@ -1311,7 +1311,7 @@ remove the file "%s" to enable FileSweeper to run.
                         if not os.path.exists(fileBase):
                             try:
                                 os.makedirs(fileBase)
-                            except Exception, info:
+                            except Exception as info:
                                 fatalError('Error creating directory "%s": %s'
                                             % (fileBase, info))
                         if not os.path.isdir(fileBase):
@@ -1328,7 +1328,7 @@ remove the file "%s" to enable FileSweeper to run.
                     # Back to where we started
                     try:
                         os.chdir(cwd)
-                    except Exception, info:
+                    except Exception as info:
                         fatalError(
          """SweepSpec "%s" could not return to directory "%s" - can't happen"""
                             % (spec.specName, cwd))
@@ -1344,7 +1344,7 @@ remove the file "%s" to enable FileSweeper to run.
           ----------- Finished File Sweep -------------
     """, LF)
 
-        except Exception, info:
+        except Exception as info:
             sys.stderr.write('Exception halted processing on: %s' % str(info))
             traceback.print_exc(file=sys.stderr)
             logf = open(LF, "a", 0)

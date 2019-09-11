@@ -140,7 +140,7 @@ class CDRScheduler(server.SchedulerServer):
         eids = [row.eid for row in datastore.engine.execute(query)]
         logging.info("found %d zombie executions", len(eids))
         for eid in eids:
-            print eid, (repr(eid))
+            print(eid, (repr(eid)))
             logging.info("marking zombie %s as FAILED", eid)
             datastore.update_execution(eid, state=failed, description=desc)
 

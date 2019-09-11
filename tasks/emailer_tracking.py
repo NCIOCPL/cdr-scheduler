@@ -156,7 +156,7 @@ class Mailer:
                     mailer.unlock("Tracker already updated")
                 else:
                     mailer.update_tracker()
-            except Exception, e:
+            except Exception as e:
                 logger.error("failure for mailer %s: %s", node.get("id"), e)
 
         # Clean up and go home.

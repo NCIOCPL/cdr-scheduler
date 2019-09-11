@@ -27,16 +27,16 @@ class TaskPropertyBag(object):
 
 if __name__ == "__main__":
     pb = TaskPropertyBag()
-    print 'Status is OK: %s' % (pb.GetStatus() == TaskStatus.OK, )
+    print('Status is OK: %s' % (pb.GetStatus() == TaskStatus.OK, ))
     
     # Test for value that should exist.
     pb.Set('prop1', 5)
     res = pb.Get('prop1', 'not found')
     if( res != 5 ):
-        print 'prop1 fail: expected 5, found \'%s\'.' % (res,)
+        print('prop1 fail: expected 5, found \'%s\'.' % (res,))
     else:
-        print 'Success for existing value.'
+        print('Success for existing value.')
         
     # Test for value that should not exist.
     res = pb.Get('prop2', 25)
-    print 'OK for value that shouldn\'t exist: %s' % (res == 25)
+    print('OK for value that shouldn\'t exist: %s' % (res == 25))

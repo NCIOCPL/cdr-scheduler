@@ -18,6 +18,6 @@ if __name__ == "__main__":
     task = ErrorTask({"a" : 1, "b" : 2, "c" : None}, {"data1" : "a", "data2" : "b"})
     try:
         task.Perform()
-        print 'This task was expected to fail but did not.'
+        print('This task was expected to fail but did not.')
     except TaskException:
-        print 'Failed in the expected manner.'
+        print('Failed in the expected manner.')

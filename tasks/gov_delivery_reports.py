@@ -131,7 +131,7 @@ class Control:
         for key in self.reports:
             try:
                 self.do_report(key)
-            except Exception, e:
+            except Exception as e:
                 self.logger.exception("do_report(%s): %s", key, e)
         self.logger.info("%s job completed", self.mode)
 

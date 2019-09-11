@@ -459,13 +459,13 @@ if __name__ == "__main__":
     opts = parser.parse_args()
     terms = Terms()
     if opts.json:
-        print(json.dumps(terms.data, indent=2))
+        print((json.dumps(terms.data, indent=2)))
     else:
         t = pprint.pformat(terms.names, indent=4)
-        print(re.sub(r"set\(\[\s+", "set([", t).replace(" u'es'", " 'es'"))
+        print((re.sub(r"set\(\[\s+", "set([", t).replace(" u'es'", " 'es'")))
         if opts.show_dups:
-            print("=" * 60)
-            print("DUPLICATES".center(60))
-            print("=" * 60)
+            print(("=" * 60))
+            print(("DUPLICATES".center(60)))
+            print(("=" * 60))
             for key in terms.dups:
-                print(repr((key, terms.dups[key])))
+                print((repr((key, terms.dups[key]))))
