@@ -324,7 +324,7 @@ class Partners:
 
         # Collect and save the Partner objects.
         control.logger.debug("database query:\n%s", query)
-        rows = [row for row in query.execute(control.cursor, timeout=300)]
+        rows = [row for row in query.execute(control.cursor)]
         self.licensees = [Partner(self, row) for row in rows]
 
     def table(self):

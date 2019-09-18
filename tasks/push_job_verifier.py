@@ -129,7 +129,7 @@ class Sweeper(CDRTask):
             recips = self.get_group_email_addresses(group)
         if not recips:
             self.logger.error("no recipients for publishing notification")
-            raise cdr.Exception("no recipients for publishing notification")
+            raise Exception("no recipients for publishing notification")
 
         # We've waited too long for the push job to finish.
         if stalled:
@@ -165,5 +165,5 @@ Please visit the following link for further details:
         errors = cdr.sendMail(sender, recips, subject, body)
         if errors:
             self.logger.error("failure sending mail: %s" % errors)
-            raise cdr.Exception("failure reporting problems(): %s" % errors)
+            raise Exception("failure reporting problems(): %s" % errors)
 

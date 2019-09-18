@@ -22,7 +22,7 @@ class Config:
             query.join("grp_usr u", "u.usr = e.id")
             query.join("grp g", "g.id = u.grp")
             query.where("g.name = 'Developers Notification'")
-            rows = query.execute(timeout=5).fetchall()
+            rows = query.execute().fetchall()
             cls.RECIPS = [row[0] for row in rows if row[0]]
         except:
             logging.exception("database unavailable - exiting")

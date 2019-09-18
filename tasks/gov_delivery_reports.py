@@ -408,7 +408,7 @@ class TrialSet:
         query.where(query.Condition(activated, control.start, ">="))
         query.where(query.Condition(activated, control.end + " 23:59:59", "<="))
         control.logger.debug("query:\n%s", query)
-        query.order("c.nlm_id").execute(control.cursor, timeout=600)
+        query.order("c.nlm_id").execute(control.cursor)
         rows = control.cursor.fetchall()
         control.logger.debug("%d rows", len(rows))
         self.trials = [Trial(*row) for row in rows]
@@ -623,7 +623,7 @@ class SummarySet:
         control.logger.debug(query)
 
         # Fetch the documents and pack up a sequence of Summary objects.
-        rows = query.execute(control.cursor, timeout=600).fetchall()
+        rows = query.execute(control.cursor).fetchall()
         return [Summary(*row) for row in rows]
 
     def table(self):

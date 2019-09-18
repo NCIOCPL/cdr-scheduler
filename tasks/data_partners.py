@@ -16,7 +16,6 @@ import lxml.html as html
 import lxml.html.builder as B
 import requests
 import cdr
-import settings
 from cdrutil import sendMail
 from cdr_task_base import CDRTask
 from core.exceptions import TaskException
