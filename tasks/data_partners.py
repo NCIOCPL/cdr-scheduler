@@ -23,7 +23,7 @@ from task_property_bag import TaskPropertyBag
 from cdrapi.users import Session
 from cdrapi import db
 from cdrapi.docs import Doc
-
+from html import escape as html_escape
 
 class Notify(CDRTask):
     """
@@ -140,7 +140,7 @@ class Notify(CDRTask):
                     Notify.test_recips = self.get_group_email_addresses(group)
                 recips = Notify.test_recips
                 self.logger.info("using recips: %r", recips)
-                message = u"<h3>%s</h3>\n%s" % (cgi.escape(extra), message)
+                message = u"<h3>%s</h3>\n%s" % (html_escape(extra), message)
             else:
                 recips = [recips]
         tries, delay = 0, self.DELAY
@@ -504,14 +504,14 @@ class Contact:
         if isinstance(line, unicode):
             line = line.encode("utf-8")
         with open(self.control.job.report_path, "a") as fp:
-            fp.write("<li>%s</li>\n" % cgi.escape(line))
+            fp.write("<li>%s</li>\n" % html_escape(line))
 
     def notify_ops(self, subject, message):
         """
         Send an copy of a warning or expiration message to the operators.
         """
 
-        contact = cgi.escape(self.display)
+        contact = html_escape(self.display)
         lead = u"The following message was sent to %s" % contact
         message = u"<p><i>%s</i></p>%s" % (lead, message)
         self.control.send(self.control.ops, subject, message)
