@@ -5,8 +5,8 @@ import datetime
 import cdr
 import cdrdb2 as cdrdb
 import cdr2gk
-from cdr_task_base import CDRTask
-from task_property_bag import TaskPropertyBag
+from .cdr_task_base import CDRTask
+from .task_property_bag import TaskPropertyBag
 
 
 class Sweeper(CDRTask):

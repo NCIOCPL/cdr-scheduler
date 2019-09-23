@@ -5,7 +5,7 @@ import os
 import psutil
 from tornado.ioloop import PollIOLoop
 from tornado.platform.select import SelectIOLoop, _Select
-from util.cdr_connection_info import CDRDBConnectionInfo
+from .util.cdr_connection_info import CDRDBConnectionInfo
 
 #
 # Override settings

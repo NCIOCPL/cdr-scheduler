@@ -3,9 +3,9 @@ Logic for nightly and weekly CDR publishing jobs.
 """
 
 import cdr
-from cdr_task_base import CDRTask
+from .cdr_task_base import CDRTask
 from core.exceptions import TaskException
-from task_property_bag import TaskPropertyBag
+from .task_property_bag import TaskPropertyBag
 
 class PublishingTask(CDRTask):
     """

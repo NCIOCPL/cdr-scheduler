@@ -1,5 +1,5 @@
 
-from cdr_task_base import CDRTask
+from .cdr_task_base import CDRTask
 from core.exceptions import TaskException
 
 class ErrorTask(CDRTask):

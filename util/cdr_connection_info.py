@@ -1,86 +1,72 @@
-#
-import cdrpw, cdrutil
+"""CDR database connection information."""
+
+from cdrapi.settings import Tier as CDRTier
 
 
 class CDRDBConnectionInfo:
-    """
-    Utility code to encapsulate look up for host/tier specific database connection
-    information. This is a wrapper around the core cdrpw and cdrutil modules, using
-    logic copied from the cdrdb module.
 
-    All properties receive values upon instantiation. There are no public methods.
+    """Utility code to encapsulate look up for host/tier specific database
+    connection information. This is a wrapper around the core cdrpw
+    and cdrutil modules, using logic copied from the cdrdb module.
+
+    All properties receive values upon instantiation. There are no
+    public methods.
 
     Properties exposed:
-        Server   - DNS name of the database server
-        Port     - port number to connect to
         Database - name of the database to connect to
-        Tier     - The tier the system is set up on.
         Password - login password
+        Port     - port number to connect to
+        Server   - DNS name of the database server
+        Tier     - The tier the system is set up on.
         Username - login userid
     """
-
-    PORTS = {}
 
     # We always want to use cdrsqlaccount and connect to the CDR database
     _USERNAME = 'cdrsqlaccount'
     _DATABASE = 'cdr'
 
     def __init__(self):
-        self.Server = None
-        self.Port = 0
-        self.Database = CDRDBConnectionInfo._DATABASE
-        self.Tier =  None
-        self.Password = None
-        self.Username = CDRDBConnectionInfo._USERNAME
+        """Create a Tier object, which gets us everything we need."""
+        self.__tier = CDRTier()
 
-        hostInfo = cdrutil.AppHost(cdrutil.getEnvironment(), cdrutil.getTier())
-        self.Server = CDRDBConnectionInfo._getDBServer(hostInfo)
-        self.Port = CDRDBConnectionInfo._getDBPort(hostInfo)
-        self.Tier =  CDRDBConnectionInfo._getTier(hostInfo)
-        self.Password = CDRDBConnectionInfo._getPassword(hostInfo)
+    @property
+    def Database(self):
+        return self._DATABASE
 
-    @staticmethod
-    def _getDBServer(hostInfo):
-        return hostInfo.host['DBWIN'][0]
+    @property
+    def Password(self):
+        if not hasattr(self, "_Password"):
+            self._Password = self.__tier.password(self.Username, self.Database)
+        return self._Password
 
-    @classmethod
-    def _loadPorts(cls):
-        ports = {}
-        for letter in "DCEFGHIJKL":
-            path = letter + ":/etc/cdrdbports"
-            try:
-                for line in open(path):
-                    tokens = line.strip().split(":")
-                    if len(tokens) == 3:
-                        tier, db, port = tokens
-                        if db.lower() == "cdr":
-                            ports[tier] = int(port)
-                return ports
-            except:
-                pass
-        raise Exception("database port configuration file not found")
+    @property
+    def Port(self):
+        if not hasattr(self, "_Port"):
+            self._Port = self.__tier.port(self.Database)
+        return self._Port
 
-    @classmethod
-    def _getDBPort(cls, hostInfo):
-        if not cls.PORTS:
-            cls.PORTS = cls._loadPorts()
-        return cls.PORTS.get(hostInfo.tier, 52300)
+    @property
+    def Server(self):
+        if not hasattr(self, "_Server"):
+            self._Server = self.__tier.sql_server
+        return self._Server
 
-    @staticmethod
-    def _getTier(hostInfo):
-        return hostInfo.tier
+    @property
+    def Tier(self):
+        return self.__tier.name
 
-    @staticmethod
-    def _getPassword(hostInfo):
-        return cdrpw.password('CBIIT', hostInfo.tier,
-                              CDRDBConnectionInfo._DATABASE,
-                              CDRDBConnectionInfo._USERNAME)
+    @property
+    def Username(self):
+        return self._USERNAME
+
+    def __str__(self):
+        return f"""\
+Database: {self.Database}
+Password: {self.Password}
+    Port: {self.Port}
+  Server: {self.Server}
+    Tier: {self.Tier}
+Username: {self.Username}"""
 
 if __name__ == "__main__":
-    x = CDRDBConnectionInfo();
-    print(" Server: %s\n port: %s\n username: %s\n password: %s\n tier: %s" %
-        (x.DBServer,
-         x.DBPort,
-         x.Username,
-         x.Password,
-         x.Tier))
+    print(CDRDBConnectionInfo())

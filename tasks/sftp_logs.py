@@ -12,11 +12,11 @@ from os import chdir
 
 # Third-party modules
 from dateutil.relativedelta import relativedelta
-from task_property_bag import TaskPropertyBag
+from .task_property_bag import TaskPropertyBag
 
 # Project modules
 import cdr
-from cdr_task_base import CDRTask
+from .cdr_task_base import CDRTask
 
 class Refresh(CDRTask):
     """

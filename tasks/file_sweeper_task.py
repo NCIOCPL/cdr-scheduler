@@ -20,7 +20,7 @@ import xml.dom.minidom
 import tarfile
 import logging
 import cdr
-import cdrutil
+from cdrapi import Tier
 
 import cdrdb2 as cdrdb
 """
@@ -29,9 +29,9 @@ implementation, based on Microsoft's OLEDB, doesn't deal with multi-
 threading well).
 """
 
-from cdr_task_base import CDRTask
+from .cdr_task_base import CDRTask
 from core.exceptions import TaskException
-from task_property_bag import TaskPropertyBag
+from .task_property_bag import TaskPropertyBag
 
 # Scheduler log file.
 logger = logging.getLogger(__name__)
@@ -52,7 +52,7 @@ YEARS_OLD = 10
 LONG_TIME = DAY_SECS * YEAR_DAYS * YEARS_OLD
 
 # Where are we running?
-TIER = cdrutil.getTier()
+TIER = Tier().name
 
 class FileSweeper(CDRTask):
     """

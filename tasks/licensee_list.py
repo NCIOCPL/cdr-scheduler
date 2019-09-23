@@ -3,9 +3,9 @@ Program to create a list of active licensees (Production/Test)
 This job should run as a scheduled job once a month.
 """
 
-from cdr_task_base import CDRTask
+from .cdr_task_base import CDRTask
 from core.exceptions import TaskException
-from task_property_bag import TaskPropertyBag
+from .task_property_bag import TaskPropertyBag
 import datetime
 import requests
 import cdr
@@ -210,7 +210,7 @@ class Control:
             data = ""
         style = cls.merge_styles(default_styles, **styles)
         if url:
-            return cls.B.TD(cls.B.A(unicode(data), href=url), style=style)
+            return cls.B.TD(cls.B.A(str(data), href=url), style=style)
         return cls.B.TD(data, style=style)
 
     @classmethod

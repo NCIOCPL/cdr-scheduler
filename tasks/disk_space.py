@@ -21,8 +21,8 @@ import argparse
 import re
 import requests
 import cdr
-from cdr_task_base import CDRTask
-from task_property_bag import TaskPropertyBag
+from .cdr_task_base import CDRTask
+from .task_property_bag import TaskPropertyBag
 
 class Monitor(CDRTask):
     """Send out alerts when available disk space is too low.

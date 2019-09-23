@@ -5,8 +5,8 @@ from CTRP.
 
 import logging
 import cdr
-from cdr_task_base import CDRTask
-from task_property_bag import TaskPropertyBag
+from .cdr_task_base import CDRTask
+from .task_property_bag import TaskPropertyBag
 
 class ClinicalTrialsTask(CDRTask):
     """

@@ -5,8 +5,8 @@ import os
 import cdr
 import cdrbatch
 import cdrdb2 as cdrdb
-from cdr_task_base import CDRTask
-from task_property_bag import TaskPropertyBag
+from .cdr_task_base import CDRTask
+from .task_property_bag import TaskPropertyBag
 
 
 class Sweeper(CDRTask):

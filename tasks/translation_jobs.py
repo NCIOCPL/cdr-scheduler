@@ -6,8 +6,8 @@ import cdr
 import cdrdb2 as cdrdb
 import datetime
 
-from cdr_task_base import CDRTask
-from task_property_bag import TaskPropertyBag
+from .cdr_task_base import CDRTask
+from .task_property_bag import TaskPropertyBag
 
 class ReportTask(CDRTask):
     """
@@ -284,8 +284,8 @@ class Control(ReportTools):
             query.order("d.title")
             row = query.execute(self.cursor).fetchone()
             if row:
-                return u"GTC for {}".format(row[0])
-            return u"GTC CDR{:d}".format(doc_id)
+                return "GTC for {}".format(row[0])
+            return "GTC CDR{:d}".format(doc_id)
         query = cdrdb.Query("document", "title")
         query.where(query.Condition("id", doc_id))
         return query.execute(self.cursor).fetchone()[0]
@@ -370,7 +370,7 @@ class Control(ReportTools):
             self.logger.error("no email recipients for %s", group)
 
     def create_report(self, jobs):
-        title = u"New {} Translation Jobs".format(self.doctype)
+        title = "New {} Translation Jobs".format(self.doctype)
         style = "font-size: .9em; font-style: italic; font-family: Arial"
         today = datetime.date.today()
         report = self.B.HTML(
@@ -444,7 +444,7 @@ class User(ReportTools):
 
     def create_report(self, control):
         args = control.doctype, self.fullname
-        title = u"{} Translation Jobs for {}".format(*args)
+        title = "{} Translation Jobs for {}".format(*args)
         style = "font-size: .9em; font-style: italic; font-family: Arial"
         body = self.B.BODY(
             self.B.H3(title, style="color: navy; font-family: Arial;"),

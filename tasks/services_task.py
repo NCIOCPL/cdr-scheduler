@@ -8,8 +8,8 @@ OCECDR-4266: remove support for retired publishing service
 
 import time
 from core.exceptions import TaskException
-from task_property_bag import TaskPropertyBag
-from cdr_task_base import CDRTask
+from .task_property_bag import TaskPropertyBag
+from .cdr_task_base import CDRTask
 import cdr
 
 class BounceTask(CDRTask):

@@ -6,8 +6,8 @@ import cdr
 import cdrdb2 as cdrdb
 import datetime
 
-from cdr_task_base import CDRTask
-from task_property_bag import TaskPropertyBag
+from .cdr_task_base import CDRTask
+from .task_property_bag import TaskPropertyBag
 
 class ReportTask(CDRTask):
     """

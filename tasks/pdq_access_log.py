@@ -15,11 +15,11 @@ from lxml import etree
 import openpyxl
 import requests
 from core.exceptions import TaskException
-from task_property_bag import TaskPropertyBag
+from .task_property_bag import TaskPropertyBag
 
 # Project modules
 import cdr
-from cdr_task_base import CDRTask
+from .cdr_task_base import CDRTask
 
 class Report(CDRTask):
     """
