@@ -88,9 +88,9 @@ class Refresh(CDRTask):
         cmd = "rsync -e \"%s\" %s ." % (ssh, src)
         fix = r"%s:\cdr\bin\fix-permissions.cmd ." % cdr.WORK_DRIVE
         self.logger.info(cmd)
-        cdr.runCommand(cmd)
+        cdr.run_command(cmd)
         self.logger.info(fix)
-        cdr.runCommand(fix)
+        cdr.run_command(fix)
 
     def normalize(self, line):
         """

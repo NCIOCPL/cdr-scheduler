@@ -222,9 +222,9 @@ class Report(CDRTask):
         cwd = os.getcwd()
         os.chdir(self.Month.LOGDIR)
         self.logger.info(cmd)
-        cdr.runCommand(cmd)
+        cdr.run_command(cmd)
         self.logger.info(fix)
-        cdr.runCommand(fix)
+        cdr.run_command(fix)
         os.chdir(cwd)
 
     def make_report(self, requests):

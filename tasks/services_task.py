@@ -100,10 +100,10 @@ class Control:
             return
 
         # Use Microsoft's command-line utility to stop the service.
-        result = cdr.runCommand("net stop \"%s\"" % name)
-        if result.code:
+        process = cdr.run_command("net stop \"%s\"" % name, merge_output=True)
+        if process.returncode:
             problem = ("stop_service(%s): error code %s (%s)" %
-                       (name, result.code, result.output))
+                       (name, process.returncode, process.stdout))
             self.logger.error(problem)
             raise TaskException(problem)
 
@@ -134,10 +134,10 @@ class Control:
             return
 
         # Use Microsoft's command-line utility to start the service.
-        result = cdr.runCommand("net start \"%s\"" % name)
-        if result.code:
+        process = cdr.run_command("net start \"%s\"" % name, merge_output=True)
+        if process.returncode:
             problem = ("start_service(%s): error code %s (%s)" %
-                       (name, result.code, result.output))
+                       (name, process.returncode, process.stdout))
             self.logger.error(problem)
             raise TaskException(problem)
 
@@ -163,7 +163,7 @@ class Control:
         """
 
         command = "net start | grep -qi \"^ *%s$\"" % name
-        return not cdr.runCommand(command).code
+        return not cdr.run_command(command).returncode
 
 def main():
     """

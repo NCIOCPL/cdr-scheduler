@@ -63,9 +63,10 @@ class Control:
 
         command = "%s/%s" % (self.UTILPATH, script)
         self.logger.info("%s started", command)
-        result = cdr.runCommand(command)
-        if result.code:
-            self.logger.error("%s - failure code %s", command, result.code)
+        process = cdr.run_command(command)
+        if result.returncode:
+            args = command, result.returncode
+            self.logger.error("%s - failure code %s", *args)
         else:
             self.logger.info("%s completed", command)
 
