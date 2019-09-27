@@ -162,7 +162,9 @@ Please visit the following link for further details:
 """ % url
 
         # Make sure the mail gets out.
-        errors = cdr.sendMail(sender, recips, subject, body)
+        opts = dict(subject=subject, body=body)
+        message = cdr.EmailMessage(sender, recips, **opts)
+        message.send()
         if errors:
             self.logger.error("failure sending mail: %s" % errors)
             raise Exception("failure reporting problems(): %s" % errors)
