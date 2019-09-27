@@ -31,7 +31,7 @@ import socket
 from lxml import etree
 import requests
 import cdr
-import cdrdb2 as cdrdb
+from cdrapi import db
 from cdrapi.settings import Tier
 from .cdr_task_base import CDRTask
 from .task_property_bag import TaskPropertyBag
@@ -70,7 +70,7 @@ class Terms:
         self.logger = logger
         if self.logger is None:
             self.logger = cdr.Logging.get_logger("glossifier", level="debug")
-        self.conn = cdrdb.connect()
+        self.conn = db.connect()
         self.cursor = self.conn.cursor()
 
     def save(self):
@@ -83,7 +83,7 @@ class Terms:
         self.cursor.execute("""\
             UPDATE glossifier
                SET refreshed = GETDATE(),
-                   terms = %s
+                   terms = ?
              WHERE pk = 1""", names)
         self.conn.commit()
 
@@ -120,7 +120,8 @@ class Terms:
             for args in failures:
                 lines.append("Server {!r} at {}: {}".format(*args))
             body = "\n".join(lines)
-            cdr.sendMail(self.SENDER, recips, subject, body, False, True)
+            opts = dict(subject=subject, body=body)
+            message = cdr.EmailMessage(self.SENDER, recips, **opts)
             self.logger.error("send failure notice sent to %r", recips)
 
     @property
@@ -162,7 +163,7 @@ class Terms:
             tags = dict(en="TermDefinition", es="TranslatedTermDefinition")
             for lang in tags:
                 path = "/GlossaryTermConcept/{}/Dictionary".format(tags[lang])
-                query = cdrdb.Query("query_term_pub", "doc_id", "value")
+                query = db.Query("query_term_pub", "doc_id", "value")
                 query.where(query.Condition("path", path))
                 rows = query.execute(self.cursor).fetchall()
                 self.logger.debug("fetched %d %s dictionaries", len(rows), lang)
@@ -289,7 +290,7 @@ class Terms:
                 ("query_term_pub q", "q.doc_id = v.id"),
             )
             path = "/GlossaryTermName/GlossaryTermConcept/@cdr:ref"
-            query = cdrdb.Query("doc_version v", *columns)
+            query = db.Query("doc_version v", *columns)
             for args in joins:
                 query.join(*args)
             query.where(query.Condition("q.path", path))
@@ -330,7 +331,9 @@ class Terms:
             for doc_id in self.dups[key]:
                 body.append("\tCDR{:010d}\n".format(doc_id))
         body = "".join(body)
-        cdr.sendMail(self.SENDER, recips, self.SUBJECT, body, False, True)
+        opts = dict(subject=self.SUBJECT, body=body)
+        message = cdr.EmailMessage(self.SENDER, recips, **opts)
+        message.send()
         self.logger.info("duplicate mapping notification sent to %r", recips)
 
 
@@ -395,7 +398,7 @@ class Term:
 
         if self.EXTRA[language] is None:
             usage = self.USAGES[language]
-            query = cdrdb.Query("external_map m", "m.value", "m.doc_id")
+            query = db.Query("external_map m", "m.value", "m.doc_id")
             query.join("external_map_usage u", "u.id = m.usage")
             query.where(query.Condition("u.name", usage))
             rows = query.execute(self.terms.cursor).fetchall()

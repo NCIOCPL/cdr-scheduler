@@ -20,9 +20,9 @@ import xml.dom.minidom
 import tarfile
 import logging
 import cdr
-from cdrapi import Tier
+from cdrapi import db
+from cdrapi.settings import Tier
 
-import cdrdb2 as cdrdb
 """
 Swap in replacement DB API implementation based on freetds (the original
 implementation, based on Microsoft's OLEDB, doesn't deal with multi-
@@ -740,7 +740,7 @@ SweepSpec: "%s"
 
         # And a read-only connection to the database
         try:
-            conn = cdrdb.connect()
+            conn = db.connect()
             cursor = conn.cursor()
         except Exception as e:
             logException(e, "attempting DB connect")
@@ -961,7 +961,7 @@ def loadConfigFile(fileName):
     """
 
     # Pull the file from the repository if available there
-    cursor = cdrdb.connect("CdrGuest").cursor()
+    cursor = db.connect("CdrGuest").cursor()
     cursor.execute("""\
         SELECT v.id, MAX(v.num)
           FROM doc_version v
@@ -975,7 +975,7 @@ def loadConfigFile(fileName):
         fatalError("More than on SweepSpecifications document found")
     elif len(rows) == 1:
         doc_id, version = rows[0]
-        query = cdrdb.Query("doc_version", "xml")
+        query = db.Query("doc_version", "xml")
         query.where(query.Condition("id", doc_id))
         query.where(query.Condition("num", version))
         row = query.execute(cursor).fetchone()
@@ -1153,7 +1153,9 @@ Error message was:
     mailSent = False
     if recips:
         try:
-            cdr.sendMail(sender, recips, subject, errorBody)
+            opts = dict(subject=subject, body=errorBody)
+            message = cdr.EmailMessage(sender, recips, **opts)
+            message.send()
             mailSent = True
         except Exception as e:
             logger.exception("Attempting to send mail for fatal error")

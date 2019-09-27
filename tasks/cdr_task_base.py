@@ -1,7 +1,7 @@
 import logging
 from core.exceptions import TaskException
 import cdr
-import cdrdb2 as cdrdb
+from cdrapi import db
 
 class CDRTask(object):
     """
@@ -55,7 +55,7 @@ class CDRTask(object):
         Replacement for cdr.getEmailList() which uses a DB API which
         does not do well in multi-threaded environments.
         """
-        query = cdrdb.Query("usr u", "u.email")
+        query = db.Query("usr u", "u.email")
         query.join("grp_usr gu", "gu.usr = u.id")
         query.join("grp g", "g.id = gu.grp")
         query.where(query.Condition("g.name", group_name))

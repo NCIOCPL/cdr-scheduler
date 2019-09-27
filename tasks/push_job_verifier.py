@@ -3,7 +3,7 @@
 
 import datetime
 import cdr
-import cdrdb2 as cdrdb
+from cdrapi import db
 import cdr2gk
 from .cdr_task_base import CDRTask
 from .task_property_bag import TaskPropertyBag
@@ -20,10 +20,10 @@ class Sweeper(CDRTask):
         """Check any push jobs which are waiting to be verified.
         """
 
-        self.conn = cdrdb.connect()
+        self.conn = db.connect()
         self.cursor = self.conn.cursor()
         self.tier = cdr.Tier().name
-        query = cdrdb.Query("pub_proc", "id", "completed")
+        query = db.Query("pub_proc", "id", "completed")
         query.where("status = 'Verifying'")
         rows = query.order("id").execute(self.cursor).fetchall()
         for job_id, completed in rows:
@@ -35,7 +35,7 @@ class Sweeper(CDRTask):
         """
 
         # Find out if the GateKeeper host was overridden from the default.
-        query = cdrdb.Query("pub_proc_parm", "parm_value")
+        query = db.Query("pub_proc_parm", "parm_value")
         query.where(query.Condition("pub_proc", job_id))
         query.where("parm_name = 'GKServer'")
         row = query.execute(self.cursor).fetchone()

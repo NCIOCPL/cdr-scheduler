@@ -3,7 +3,7 @@ Logic for Gov Delivery reports
 """
 
 import cdr
-import cdrdb2 as cdrdb
+from cdrapi import db
 import datetime
 
 from .cdr_task_base import CDRTask
@@ -41,8 +41,8 @@ class Control:
     DEFAULT_START   Fall back on this for beginning of date range for report.
     DEFAULT_END     Fall back on this for end of date range.
     REPORTS         Full set of reports to be run by default (in order).
-    SENDER          First argument to cdr.sendMail().
-    CHARSET         Encoding used by cdr.sendMail().
+    SENDER          First argument to cdr.EmailMessage constructor.
+    CHARSET         Used in HTML page.
     TSTYLE          CSS formatting rules for table elements.
     TO_STRING_OPTS  Options used for serializing HTML report object.
     CG              DNS name for this tier's Cancer.gov host.
@@ -122,7 +122,7 @@ class Control:
         self.start = options.get("start") or str(self.DEFAULT_START)
         self.end = options.get("end") or str(self.DEFAULT_END)
         self.test = self.mode == "test"
-        self.cursor = cdrdb.connect("CdrGuest").cursor()
+        self.cursor = db.connect("CdrGuest").cursor()
         if self.skip_email:
             self.logger.info("skipping email of reports")
 
@@ -245,7 +245,9 @@ class Control:
         recips = CDRTask.get_group_email_addresses(group)
         if recips:
             subject = "[%s] %s" % (self.TIER.name, self.title)
-            cdr.sendMailMime(self.SENDER, recips, subject, report, "html")
+            opts = dict(subject=subject, body=report, subtype="html")
+            message = cdr.EmailMessage(self.SENDER, recips, **opts)
+            message.send()
             self.logger.info("sent %s", subject)
             self.logger.info("recips: %s", ", ".join(recips))
         else:
@@ -401,7 +403,7 @@ class TrialSet:
         self.control = control
         activated = "ISNULL(c.became_active, 0)"
         columns = ("c.nlm_id", "c.cdr_id", "c.became_active", "q.value")
-        query = cdrdb.Query("ctgov_import c", *columns)
+        query = db.Query("ctgov_import c", *columns)
         query.join("pub_proc_cg p", "p.id = c.cdr_id")
         query.join("query_term_pub q", "q.doc_id = c.cdr_id")
         query.where("q.path = '/CTGovProtocol/BriefTitle'")
@@ -576,7 +578,7 @@ class SummarySet:
         columns = ["d.id", "t.value", "u.value", f_col]
 
         # Create a new query against the document table.
-        query = cdrdb.Query("document d", *columns).order("t.value").unique()
+        query = db.Query("document d", *columns).order("t.value").unique()
 
         # Make sure the document is active and currently published.
         query.where("d.active_status = 'A'")

@@ -5,7 +5,7 @@ import os
 import psutil
 from tornado.ioloop import PollIOLoop
 from tornado.platform.select import SelectIOLoop, _Select
-from .util.cdr_connection_info import CDRDBConnectionInfo
+from Scheduler.util.cdr_connection_info import CDRDBConnectionInfo
 
 #
 # Override settings
@@ -39,7 +39,8 @@ DATABASE_CONFIG_DICT = {
     "password": _dbInfo.Password,
     "hostname": _dbInfo.Server,
     "port": _dbInfo.Port,
-    "database": _dbInfo.Database
+    "database": _dbInfo.Database,
+    "driver": "ODBC Driver 17 for SQL Server",
 }
 
 #----------------------------------------------------------------------

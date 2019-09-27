@@ -283,7 +283,9 @@ class Report(CDRTask):
         )
         body = "\n".join(body)
         recips = self.recips
-        cdr.sendMail(self.SENDER, recips, subject, body, attachments=[book])
+        opts = dict(subject=subject, body=body, attachments=[book])
+        message = cdr.EmailMessage(self.SENDER, **opts)
+        message.send()
         self.logger.info("sent report to %s", ", ".join(recips))
 
     class Month:

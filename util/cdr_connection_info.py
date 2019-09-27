@@ -7,7 +7,7 @@ class CDRDBConnectionInfo:
 
     """Utility code to encapsulate look up for host/tier specific database
     connection information. This is a wrapper around the core cdrpw
-    and cdrutil modules, using logic copied from the cdrdb module.
+    and cdrutil modules, using logic copied from the cdrapi.db module.
 
     All properties receive values upon instantiation. There are no
     public methods.

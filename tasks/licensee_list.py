@@ -9,7 +9,7 @@ from .task_property_bag import TaskPropertyBag
 import datetime
 import requests
 import cdr
-import cdrdb2 as cdrdb
+from cdrapi import db
 
 class ReportTask(CDRTask):
     """
@@ -42,8 +42,8 @@ class Control:
 
     TITLE           Name of the report
     REPORTS         Full set of reports to be run by default (in order).
-    SENDER          First argument to cdr.sendMail().
-    CHARSET         Encoding used by cdr.sendMail().
+    SENDER          First argument to cdr.EmailMessage constructor.
+    CHARSET         Encoding used by HTML page.
     TSTYLE          CSS formatting rules for table elements.
     TO_STRING_OPTS  Options used for serializing HTML report object.
     B               HTML builder module imported at Control class scope.
@@ -101,7 +101,7 @@ class Control:
         self.logger = logger
         if self.mode not in self.MODES:
             raise TaskException("invalid mode %s" % repr(self.mode))
-        self.cursor = cdrdb.connect("CdrGuest", as_dict=True).cursor()
+        self.cursor = db.connect("CdrGuest", as_dict=True).cursor()
 
     def run(self):
         """
@@ -168,7 +168,9 @@ class Control:
         recips = CDRTask.get_group_email_addresses(group)
         title = "PDQ Distribution Partner List"
         subject = "[%s] %s" % (cdr.Tier().name, title)
-        cdr.sendMail(self.SENDER, recips, subject, report, html=True)
+        opts = dict(subject=subject, body=report, subtype="html")
+        message = cdr.EmailMessage(self.SENDER, recips, **opts)
+        message.send()
         self.logger.info("sent %s", subject)
         self.logger.info("recips: %s", ", ".join(recips))
 
@@ -285,7 +287,7 @@ class Partners:
                 "pa.value AS prod_activation",
                 "pi.value AS prod_inactivation",
                 "un.value AS user_name")
-        query = cdrdb.Query("query_term n", *cols)
+        query = db.Query("query_term n", *cols)
 
         # Get the licensee's name.
         query.where("n.path = '%s'" % self.NAME)
