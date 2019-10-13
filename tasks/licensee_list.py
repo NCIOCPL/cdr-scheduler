@@ -101,7 +101,7 @@ class Control:
         self.logger = logger
         if self.mode not in self.MODES:
             raise TaskException("invalid mode %s" % repr(self.mode))
-        self.cursor = db.connect("CdrGuest", as_dict=True).cursor()
+        self.cursor = db.connect(user="CdrGuest").cursor()
 
     def run(self):
         """
@@ -271,7 +271,7 @@ class Partners:
         """
 
         # Fetch information about when each account last fetched data.
-        url = ("https://cdr-dev.cancer.gov"
+        url = ("https://cdr-dev2.cancer.gov"
                "/cgi-bin/cdr/last-pdq-data-partner-accesses.py")
         control.logger.info("fetching contacts from %r", url)
         self.last_access = dict()
@@ -326,7 +326,9 @@ class Partners:
 
         # Collect and save the Partner objects.
         control.logger.debug("database query:\n%s", query)
-        rows = [row for row in query.execute(control.cursor)]
+        rows = query.execute(control.cursor)
+        cols = [description[0] for description in control.cursor]
+        rows = [dict(zip(cols, row)) for row in rows]
         self.licensees = [Partner(self, row) for row in rows]
 
     def table(self):

@@ -19,7 +19,7 @@ class Sweeper(CDRTask):
         """Launch any batch jobs which are in the queue.
         """
 
-        conn = db.connect("CdrPublishing")
+        conn = db.connect(user="CdrPublishing")
         cursor = conn.cursor()
         query = db.Query("batch_job", "id", "command")
         query.where(query.Condition("status", cdrbatch.ST_QUEUED))

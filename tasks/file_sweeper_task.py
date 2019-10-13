@@ -962,7 +962,7 @@ def loadConfigFile(fileName):
     """
 
     # Pull the file from the repository if available there
-    cursor = db.connect("CdrGuest").cursor()
+    cursor = db.connect(user="CdrGuest").cursor()
     cursor.execute("""\
         SELECT v.id, MAX(v.num)
           FROM doc_version v
