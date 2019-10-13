@@ -122,7 +122,7 @@ class Control:
         self.start = options.get("start") or str(self.DEFAULT_START)
         self.end = options.get("end") or str(self.DEFAULT_END)
         self.test = self.mode == "test"
-        self.cursor = db.connect("CdrGuest").cursor()
+        self.cursor = db.connect(user="CdrGuest").cursor()
         if self.skip_email:
             self.logger.info("skipping email of reports")
 

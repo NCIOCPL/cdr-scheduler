@@ -244,7 +244,7 @@ class SweepSpec:
 
         # Times should be reasonable e.g., now until 10 years before now
         if self.oldSpec:
-            if self.oldSpec >= now or self.youngSpec >= now:
+            if self.oldSpec >= now or self.youngSpec and self.youngSpec >= now:
                 fatalError('A date >= current date in SweepSpec "%s"' %
                             self.specName)
             longAgo = now - LONG_TIME

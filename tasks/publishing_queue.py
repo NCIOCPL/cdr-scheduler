@@ -19,7 +19,7 @@ class Sweeper(CDRTask):
         """Launch any publishing jobs which are in the queue.
         """
 
-        conn = db.connect("CdrPublishing")
+        conn = db.connect(user="CdrPublishing")
         cursor = conn.cursor()
         query = db.Query("pub_proc", "id", "pub_subset")
         query.where("status = 'Ready'")
