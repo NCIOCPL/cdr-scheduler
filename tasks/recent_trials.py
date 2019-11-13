@@ -138,7 +138,7 @@ class Control:
         """
 
         rows = db.Query("ctgov_trial", "nct_id").execute(self.cursor)
-        nct_ids = set([row["nct_id"].upper() for row in rows])
+        nct_ids = set([row.nct_id.upper() for row in rows])
         zf = zipfile.ZipFile(self.ZIPFILE)
         names = zf.namelist()
         loaded = 0
@@ -182,10 +182,10 @@ INSERT INTO ctgov_trial_sponsor (nct_id, position, sponsor)
         of 2015.
         """
 
-        query = db.Query("ctgov_trial", "MAX(first_received) as mfr")
-        rows = query.execute(as_dict=True).fetchall()
+        query = db.Query("ctgov_trial", "MAX(first_received) AS mfr")
+        rows = query.execute(self.cursor).fetchall()
         for row in rows:
-            return (row["mfr"] - datetime.timedelta(21)).date()
+            return (row.mfr - datetime.timedelta(21)).date()
         return datetime.date(2015, 1, 1)
 
     @staticmethod
