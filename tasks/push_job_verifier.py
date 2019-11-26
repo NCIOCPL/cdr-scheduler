@@ -49,6 +49,7 @@ class Sweeper(CDRTask):
         failures = []
         warnings = []
         verified = True
+
         for doc in details.docs:
             if doc.status == "Warning":
                 warnings.append(doc)
@@ -165,7 +166,8 @@ Please visit the following link for further details:
         opts = dict(subject=subject, body=body)
         message = cdr.EmailMessage(sender, recips, **opts)
         message.send()
-        if errors:
-            self.logger.error("failure sending mail: %s" % errors)
-            raise Exception("failure reporting problems(): %s" % errors)
+        self.logger.info("Problem report email send")
 
+        #if errors:
+        #    self.logger.error("failure sending mail: %s" % errors)
+        #    raise Exception("failure reporting problems(): %s" % errors)
