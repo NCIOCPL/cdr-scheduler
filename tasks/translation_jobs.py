@@ -164,7 +164,7 @@ class Control(ReportTools):
         if self.schedule == "weekly":
             title = "Documents Ready For Translation"
         self.title = "{} {}".format(self.doctype, title)
-        self.cursor = db.connect("CdrGuest").cursor()
+        self.cursor = db.connect(user="CdrGuest").cursor()
 
     def run(self):
         "Generate and email the report."
