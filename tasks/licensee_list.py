@@ -271,7 +271,7 @@ class Partners:
         """
 
         # Fetch information about when each account last fetched data.
-        url = ("https://cdr-dev2.cancer.gov"
+        url = ("https://cdr-dev.cancer.gov"
                "/cgi-bin/cdr/last-pdq-data-partner-accesses.py")
         control.logger.info("fetching contacts from %r", url)
         self.last_access = dict()
