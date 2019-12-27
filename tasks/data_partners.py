@@ -147,7 +147,7 @@ class Notify(CDRTask):
             self.logger.debug("top of send(%r)", recips)
             try:
                 opts = dict(subject=subject, body=message, subtype="html")
-                msg = cdr.EmailMessage(self.SENDER, recips, *opts)
+                msg = cdr.EmailMessage(self.SENDER, recips, **opts)
                 msg.send()
                 msg = str(msg)
                 if self.log_messages:
