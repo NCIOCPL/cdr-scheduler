@@ -283,7 +283,7 @@ class Notify(CDRTask):
                     row = B.TR(B.TD(name, style="text-align: right;"))
                     table.append(row)
                 row.append(B.TD(count, style="text-align: right;"))
-            return html.tostring(table)
+            return html.tostring(table, encoding="html")
 
 
 class Contact:
