@@ -184,6 +184,7 @@ class Report(CDRTask):
         self.sync_logs()
         with gzip.open(self.log_path) as fp:
             for line in fp.readlines():
+                line = str(line, "utf-8")
                 if "]: open " in line:
                     request = Request(line, sids, self.orgs)
                     if request.user in self.NON_PARTNERS:
