@@ -285,7 +285,7 @@ class Report(CDRTask):
         body = "\n".join(body)
         recips = self.recips
         opts = dict(subject=subject, body=body, attachments=[book])
-        message = cdr.EmailMessage(self.SENDER, **opts)
+        message = cdr.EmailMessage(self.SENDER, recips, **opts)
         message.send()
         self.logger.info("sent report to %s", ", ".join(recips))
 
