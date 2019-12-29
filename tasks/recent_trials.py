@@ -183,7 +183,7 @@ INSERT INTO ctgov_trial_sponsor (nct_id, position, sponsor)
         """
 
         query = db.Query("ctgov_trial", "MAX(first_received) AS mfr")
-        rows = query.execute(self.cursor).fetchall()
+        rows = query.execute().fetchall()
         for row in rows:
             return (row.mfr - datetime.timedelta(21)).date()
         return datetime.date(2015, 1, 1)
