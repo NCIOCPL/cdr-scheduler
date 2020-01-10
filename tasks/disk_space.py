@@ -21,8 +21,8 @@ import argparse
 import re
 import requests
 import cdr
-from cdr_task_base import CDRTask
-from task_property_bag import TaskPropertyBag
+from .cdr_task_base import CDRTask
+from .task_property_bag import TaskPropertyBag
 
 class Monitor(CDRTask):
     """Send out alerts when available disk space is too low.
@@ -53,7 +53,8 @@ class Monitor(CDRTask):
             self.check()
         except Exception as e:
             self.logger.exception("failure")
-            cdr.sendMail(self.FROM, self.recips, "DISK CHECK FAILURE", str(e))
+            opts = dict(subject="DISK CHECK FAILURE", body=str(e))
+            message = cdr.EmailMessage(self.FROM, self.recips, **opts)
         finally:
             return TaskPropertyBag()
     def check(self):
@@ -76,7 +77,9 @@ class Monitor(CDRTask):
                     problems.append(problem)
         if problems:
             subject = "*** WARNING: CDR DISK SPACE CHECK ***"
-            cdr.sendMail(self.FROM, self.recips, subject, "\n".join(problems))
+            opts = dict(subject=subject, body="\n".join(problems))
+            message = cdr.EmailMessage(self.FROM, self.recips, **opts)
+            message.send()
             self.logger.info("sent alert to %s", ", ".join(self.recips))
         else:
             self.logger.info("disk space OK")

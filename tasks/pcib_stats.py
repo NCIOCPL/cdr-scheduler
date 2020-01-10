@@ -5,9 +5,9 @@ See https://tracker.nci.nih.gov/browse/OCECDR-3478 for original requirements
 for this report.
 """
 
-from cdr_task_base import CDRTask
+from .cdr_task_base import CDRTask
 from core.exceptions import TaskException
-from task_property_bag import TaskPropertyBag
+from .task_property_bag import TaskPropertyBag
 import cdr_stats
 
 

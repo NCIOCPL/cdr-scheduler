@@ -3,10 +3,10 @@
 
 import datetime
 import cdr
-import cdrdb2 as cdrdb
+from cdrapi import db
 import cdr2gk
-from cdr_task_base import CDRTask
-from task_property_bag import TaskPropertyBag
+from .cdr_task_base import CDRTask
+from .task_property_bag import TaskPropertyBag
 
 
 class Sweeper(CDRTask):
@@ -20,10 +20,10 @@ class Sweeper(CDRTask):
         """Check any push jobs which are waiting to be verified.
         """
 
-        self.conn = cdrdb.connect()
+        self.conn = db.connect()
         self.cursor = self.conn.cursor()
         self.tier = cdr.Tier().name
-        query = cdrdb.Query("pub_proc", "id", "completed")
+        query = db.Query("pub_proc", "id", "completed")
         query.where("status = 'Verifying'")
         rows = query.order("id").execute(self.cursor).fetchall()
         for job_id, completed in rows:
@@ -35,7 +35,7 @@ class Sweeper(CDRTask):
         """
 
         # Find out if the GateKeeper host was overridden from the default.
-        query = cdrdb.Query("pub_proc_parm", "parm_value")
+        query = db.Query("pub_proc_parm", "parm_value")
         query.where(query.Condition("pub_proc", job_id))
         query.where("parm_name = 'GKServer'")
         row = query.execute(self.cursor).fetchone()
@@ -49,6 +49,7 @@ class Sweeper(CDRTask):
         failures = []
         warnings = []
         verified = True
+
         for doc in details.docs:
             if doc.status == "Warning":
                 warnings.append(doc)
@@ -129,7 +130,7 @@ class Sweeper(CDRTask):
             recips = self.get_group_email_addresses(group)
         if not recips:
             self.logger.error("no recipients for publishing notification")
-            raise cdr.Exception("no recipients for publishing notification")
+            raise Exception("no recipients for publishing notification")
 
         # We've waited too long for the push job to finish.
         if stalled:
@@ -162,8 +163,11 @@ Please visit the following link for further details:
 """ % url
 
         # Make sure the mail gets out.
-        errors = cdr.sendMail(sender, recips, subject, body)
-        if errors:
-            self.logger.error("failure sending mail: %s" % errors)
-            raise cdr.Exception("failure reporting problems(): %s" % errors)
+        opts = dict(subject=subject, body=body)
+        message = cdr.EmailMessage(sender, recips, **opts)
+        message.send()
+        self.logger.info("Problem report email send")
 
+        #if errors:
+        #    self.logger.error("failure sending mail: %s" % errors)
+        #    raise Exception("failure reporting problems(): %s" % errors)

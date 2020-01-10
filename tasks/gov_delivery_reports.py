@@ -3,11 +3,11 @@ Logic for Gov Delivery reports
 """
 
 import cdr
-import cdrdb2 as cdrdb
+from cdrapi import db
 import datetime
 
-from cdr_task_base import CDRTask
-from task_property_bag import TaskPropertyBag
+from .cdr_task_base import CDRTask
+from .task_property_bag import TaskPropertyBag
 
 class ReportTask(CDRTask):
     """
@@ -41,8 +41,8 @@ class Control:
     DEFAULT_START   Fall back on this for beginning of date range for report.
     DEFAULT_END     Fall back on this for end of date range.
     REPORTS         Full set of reports to be run by default (in order).
-    SENDER          First argument to cdr.sendMail().
-    CHARSET         Encoding used by cdr.sendMail().
+    SENDER          First argument to cdr.EmailMessage constructor.
+    CHARSET         Used in HTML page.
     TSTYLE          CSS formatting rules for table elements.
     TO_STRING_OPTS  Options used for serializing HTML report object.
     CG              DNS name for this tier's Cancer.gov host.
@@ -122,7 +122,7 @@ class Control:
         self.start = options.get("start") or str(self.DEFAULT_START)
         self.end = options.get("end") or str(self.DEFAULT_END)
         self.test = self.mode == "test"
-        self.cursor = cdrdb.connect("CdrGuest").cursor()
+        self.cursor = db.connect(user="CdrGuest").cursor()
         if self.skip_email:
             self.logger.info("skipping email of reports")
 
@@ -131,7 +131,7 @@ class Control:
         for key in self.reports:
             try:
                 self.do_report(key)
-            except Exception, e:
+            except Exception as e:
                 self.logger.exception("do_report(%s): %s", key, e)
         self.logger.info("%s job completed", self.mode)
 
@@ -245,7 +245,9 @@ class Control:
         recips = CDRTask.get_group_email_addresses(group)
         if recips:
             subject = "[%s] %s" % (self.TIER.name, self.title)
-            cdr.sendMailMime(self.SENDER, recips, subject, report, "html")
+            opts = dict(subject=subject, body=report, subtype="html")
+            message = cdr.EmailMessage(self.SENDER, recips, **opts)
+            message.send()
             self.logger.info("sent %s", subject)
             self.logger.info("recips: %s", ", ".join(recips))
         else:
@@ -401,14 +403,14 @@ class TrialSet:
         self.control = control
         activated = "ISNULL(c.became_active, 0)"
         columns = ("c.nlm_id", "c.cdr_id", "c.became_active", "q.value")
-        query = cdrdb.Query("ctgov_import c", *columns)
+        query = db.Query("ctgov_import c", *columns)
         query.join("pub_proc_cg p", "p.id = c.cdr_id")
         query.join("query_term_pub q", "q.doc_id = c.cdr_id")
         query.where("q.path = '/CTGovProtocol/BriefTitle'")
         query.where(query.Condition(activated, control.start, ">="))
         query.where(query.Condition(activated, control.end + " 23:59:59", "<="))
         control.logger.debug("query:\n%s", query)
-        query.order("c.nlm_id").execute(control.cursor, timeout=600)
+        query.order("c.nlm_id").execute(control.cursor)
         rows = control.cursor.fetchall()
         control.logger.debug("%d rows", len(rows))
         self.trials = [Trial(*row) for row in rows]
@@ -576,7 +578,7 @@ class SummarySet:
         columns = ["d.id", "t.value", "u.value", f_col]
 
         # Create a new query against the document table.
-        query = cdrdb.Query("document d", *columns).order("t.value").unique()
+        query = db.Query("document d", *columns).order("t.value").unique()
 
         # Make sure the document is active and currently published.
         query.where("d.active_status = 'A'")
@@ -623,7 +625,7 @@ class SummarySet:
         control.logger.debug(query)
 
         # Fetch the documents and pack up a sequence of Summary objects.
-        rows = query.execute(control.cursor, timeout=600).fetchall()
+        rows = query.execute(control.cursor).fetchall()
         return [Summary(*row) for row in rows]
 
     def table(self):

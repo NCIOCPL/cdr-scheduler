@@ -3,9 +3,9 @@ Logic for nightly and weekly CDR publishing jobs.
 """
 
 import cdr
-from cdr_task_base import CDRTask
+from .cdr_task_base import CDRTask
 from core.exceptions import TaskException
-from task_property_bag import TaskPropertyBag
+from .task_property_bag import TaskPropertyBag
 
 class PublishingTask(CDRTask):
     """
@@ -158,9 +158,9 @@ class Control:
         subject = self.quote_arg(subject)
         message = self.quote_arg(message)
         command = "%s %s %s %s" % (cdr.PYTHON, path, subject, message)
-        result = cdr.runCommand(command, joinErr2Out=False)
-        if result.error:
-            self.logger.error("sending email: %s", result.error)
+        process = cdr.run_command(command)
+        if process.stderr:
+            self.logger.error("sending email: %s", process.stderr)
 
     def report_error(self, script):
         """
@@ -186,9 +186,9 @@ class Control:
         a "success" code even if it failed.
         """
 
-        if result.code:
+        if result.returncode:
             return True
-        return script == "SubmitPubJob.py" and "Failure" in result.output
+        return script == "SubmitPubJob.py" and "Failure" in result.stdout
 
     def launch(self, script, include_pubmode=True, merge_output=False,
                include_runmode=True):
@@ -218,9 +218,9 @@ class Control:
             if pattern:
                 command += " " + pattern % self.job_id
         self.logger.info(command)
-        result = cdr.runCommand(command, joinErr2Out=merge_output)
-        if self.failed(script, result):
-            self.logger.debug(result.output)
+        process = cdr.run_command(command, merge_output=merge_output)
+        if self.failed(script, process):
+            self.logger.debug(process.stdout)
             self.report_error(script)
 
 if __name__ == "__main__":

@@ -3,11 +3,11 @@ Logic for reports on the translation job queues
 """
 
 import cdr
-import cdrdb2 as cdrdb
+from cdrapi import db
 import datetime
 
-from cdr_task_base import CDRTask
-from task_property_bag import TaskPropertyBag
+from .cdr_task_base import CDRTask
+from .task_property_bag import TaskPropertyBag
 
 class ReportTask(CDRTask):
     """
@@ -35,8 +35,8 @@ class ReportTools:
     Common functionality for building/sending the reports
 
     TEST            Template for identifying redirected message for test run
-    SENDER          First argument to cdr.sendMail().
-    CHARSET         Encoding used by cdr.sendMail().
+    SENDER          First argument to cdr.EmailMessage constructor
+    CHARSET         For HTML page.
     TSTYLE          CSS formatting rules for table elements.
     TO_STRING_OPTS  Options used for serializing HTML report object.
     B               HTML builder module imported at Control class scope.
@@ -164,7 +164,7 @@ class Control(ReportTools):
         if self.schedule == "weekly":
             title = "Documents Ready For Translation"
         self.title = "{} {}".format(self.doctype, title)
-        self.cursor = cdrdb.connect("CdrGuest").cursor()
+        self.cursor = db.connect(user="CdrGuest").cursor()
 
     def run(self):
         "Generate and email the report."
@@ -213,7 +213,7 @@ class Control(ReportTools):
 
         fields = ("d.id", "d.title", "s.value_name", "u.name", "u.fullname",
                   "u.id", "u.email", "j.state_date")
-        query = cdrdb.Query("summary_translation_job j", *fields)
+        query = db.Query("summary_translation_job j", *fields)
         query.join("usr u", "u.id = j.assigned_to")
         query.join("document d", "d.id = j.english_id")
         query.join("summary_translation_state s", "s.value_id = j.state_id")
@@ -231,7 +231,7 @@ class Control(ReportTools):
 
         fields = ("d.id", "d.title", "s.value_name", "u.name", "u.fullname",
                   "u.id", "u.email", "j.state_date")
-        query = cdrdb.Query("media_translation_job j", *fields)
+        query = db.Query("media_translation_job j", *fields)
         query.join("usr u", "u.id = j.assigned_to")
         query.join("document d", "d.id = j.english_id")
         query.join("media_translation_state s", "s.value_id = j.state_id")
@@ -250,7 +250,7 @@ class Control(ReportTools):
 
         fields = ("d.id", "t.name", "s.value_name", "u.name", "u.fullname",
                   "u.id", "s.value_pos", "u.email", "j.state_date")
-        query = cdrdb.Query("glossary_translation_job j", *fields)
+        query = db.Query("glossary_translation_job j", *fields)
         query.join("usr u", "u.id = j.assigned_to")
         query.join("document d", "d.id = j.doc_id")
         query.join("doc_type t", "t.id = d.doc_type")
@@ -277,16 +277,16 @@ class Control(ReportTools):
 
         if doc_type == "GlossaryTermConcept":
             path = "/GlossaryTermName/GlossaryTermConcept/@cdr:ref"
-            query = cdrdb.Query("document d", "d.title").limit(1)
+            query = db.Query("document d", "d.title").limit(1)
             query.join("query_term q", "q.doc_id = d.id")
             query.where(query.Condition("q.path", path))
             query.where(query.Condition("q.int_val", doc_id))
             query.order("d.title")
             row = query.execute(self.cursor).fetchone()
             if row:
-                return u"GTC for {}".format(row[0])
-            return u"GTC CDR{:d}".format(doc_id)
-        query = cdrdb.Query("document", "title")
+                return "GTC for {}".format(row[0])
+            return "GTC CDR{:d}".format(doc_id)
+        query = db.Query("document", "title")
         query.where(query.Condition("id", doc_id))
         return query.execute(self.cursor).fetchone()[0]
 
@@ -313,7 +313,7 @@ class Control(ReportTools):
         """
 
         fields = ("d.title", "d.id", "u.fullname", "j.state_date")
-        query = cdrdb.Query("media_translation_job j", *fields)
+        query = db.Query("media_translation_job j", *fields)
         query.join("usr u", "u.id = j.assigned_to")
         query.join("document d", "d.id = j.english_id")
         query.join("media_translation_state s", "s.value_id = j.state_id")
@@ -334,7 +334,7 @@ class Control(ReportTools):
         """
 
         fields = ("d.id", "t.name", "u.fullname", "j.state_date")
-        query = cdrdb.Query("glossary_translation_job j", *fields)
+        query = db.Query("glossary_translation_job j", *fields)
         query.join("usr u", "u.id = j.assigned_to")
         query.join("document d", "d.id = j.doc_id")
         query.join("doc_type t", "t.id = d.doc_type")
@@ -363,14 +363,16 @@ class Control(ReportTools):
         recips = CDRTask.get_group_email_addresses(group)
         if recips:
             subject = "[%s] %s" % (cdr.Tier().name, self.title)
-            cdr.sendMailMime(self.SENDER, recips, subject, report, "html")
+            opts = dict(subject=subject, body=report, subtype="html")
+            message = cdr.EmailMessage(self.SENDER, recips, **opts)
+            message.send()
             self.logger.info("sent %s", subject)
             self.logger.info("recips: %s", ", ".join(recips))
         else:
             self.logger.error("no email recipients for %s", group)
 
     def create_report(self, jobs):
-        title = u"New {} Translation Jobs".format(self.doctype)
+        title = "New {} Translation Jobs".format(self.doctype)
         style = "font-size: .9em; font-style: italic; font-family: Arial"
         today = datetime.date.today()
         report = self.B.HTML(
@@ -435,7 +437,9 @@ class User(ReportTools):
             recips = [self.email]
         if recips:
             subject = "[%s] %s" % (cdr.Tier().name, control.title)
-            cdr.sendMailMime(self.SENDER, recips, subject, report, "html")
+            opts = dict(subject=subject, body=report, subtype="html")
+            message = cdr.EmailMessage(self.SENDER, recips, **opts)
+            message.send()
 
             control.logger.info("sent %s", subject)
             control.logger.info("recips: %s", ", ".join(recips))
@@ -444,7 +448,7 @@ class User(ReportTools):
 
     def create_report(self, control):
         args = control.doctype, self.fullname
-        title = u"{} Translation Jobs for {}".format(*args)
+        title = "{} Translation Jobs for {}".format(*args)
         style = "font-size: .9em; font-style: italic; font-family: Arial"
         body = self.B.BODY(
             self.B.H3(title, style="color: navy; font-family: Arial;"),

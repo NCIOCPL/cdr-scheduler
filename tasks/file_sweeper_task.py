@@ -20,24 +20,26 @@ import xml.dom.minidom
 import tarfile
 import logging
 import cdr
-import cdrutil
+from cdrapi import db
+from cdrapi.settings import Tier
 
-import cdrdb2 as cdrdb
 """
 Swap in replacement DB API implementation based on freetds (the original
 implementation, based on Microsoft's OLEDB, doesn't deal with multi-
 threading well).
 """
 
-from cdr_task_base import CDRTask
+from .cdr_task_base import CDRTask
 from core.exceptions import TaskException
-from task_property_bag import TaskPropertyBag
+from .task_property_bag import TaskPropertyBag
 
-# Scheduler log file.
+# Scheduler log file (we don't use it directly ourselves).
 logger = logging.getLogger(__name__)
 
 # Filesweeper Logfile (separate from the scheduler's.)
-LF = cdr.DEFAULT_LOGDIR + "/FileSweeper.log"
+LOGNAME = "FileSweeper"
+LF = f"{cdr.DEFAULT_LOGDIR}/{LOGNAME}.log"
+FS_LOGGER = cdr.Logging.get_logger(LOGNAME)
 
 # Don't go wild creating output files
 MAX_OUTPUT_FILES_WITH_ONE_NAME = 5
@@ -52,7 +54,7 @@ YEARS_OLD = 10
 LONG_TIME = DAY_SECS * YEAR_DAYS * YEARS_OLD
 
 # Where are we running?
-TIER = cdrutil.getTier()
+TIER = Tier().name
 
 class FileSweeper(CDRTask):
     """
@@ -183,9 +185,9 @@ class SweepSpec:
                             elif child.nodeName == 'Comment':
                                 pass
                             else:
-                                fatalError(
-                              'Unrecognized element "%s" in SweepSpec "%s"'
-                                           % (child.nodeName, self.specName))
+                                msg = "Unrecognized element %r in SweepSpec %r"
+                                args = child.nodeName, self.specName
+                                fatalError(msg.format(*args))
                 elif elem == 'OutputFile':
                     self.outFile = cdr.getTextContent(node)
                 elif elem == 'Oldest':
@@ -204,47 +206,45 @@ class SweepSpec:
                 elif elem == 'Comment':
                     pass
                 else:
-                    fatalError('Unrecognized element "%s" in SweepSpec "%s"'
-                               % (elem, self.specName))
+                    msg = "Unrecognized element %r in SweepSpec %r"
+                    fatalError(msg.format(elem, self.specName))
 
         # Validate
         if self.specName == "Unknown":
             fatalError("No Name subelement in one of the SweepSpec elements")
         if not self.action:
-            fatalError('No Action in SweepSpec "%s"' % self.specName)
+            fatalError(f"No Action in SweepSpec {self.specName!r}")
         if self.action not in ('Archive', 'Delete', 'TruncateArchive',
                                'TruncateDelete', 'Custom'):
-            fatalError('Invalid Action "%s" in SweepSpec "%s"' %
-                       (self.action, self.specName))
+            msg = "Invalid Action '{}' in SweepSpec '{}'"
+            fatalError(msg.format(self.action, self.specName))
         if self.inFiles == []:
             if self.action != 'Custom':
-                fatalError('No File (or InputFiles?) in SweepSpec "%s"' %
-                           self.specName)
+                msg = "No File (or InputFiles?) in SweepSpec '{}'"
+                fatalError(msg.format(self.specName))
 
         # Validate combinations of specs
         if not self.outFile and self.action in ('Archive','TruncateArchive'):
-            fatalError(
-             "No output file specified for SweepSpec %s with Action=%s" %
-                (self.specName, self.action))
+            msg = "No output file specified for SweepSpec {} with Action={}"
+            fatalError(msg.format(self.specName, self.action))
         if not (self.oldSpec and self.youngSpec):
             if self.action == 'Archive':
-                fatalError(
-                  'Must specify Oldest/Youngest for Archive SweepSpec "%s"'
-                  % self.specName)
+                msg = "Must specify Oldest/Youngest for Archive SweepSpec {}"
+                fatalError(msg.format(repr(self.specName)))
         if not (self.maxSizeSpec and self.truncSizeSpec):
             if self.action.startswith('Truncate'):
-                fatalError(
-                  'Must specify Biggest/Smallest for Truncate SweepSpec "%s"'
-                  % self.specName)
+                msg = "Must specify Biggest/Smallest for Truncate "
+                msg += "SweepSpec '{}'"
+                fatalError(msg.format(self.specName))
         if self.customProc and self.customProc == 'expireMeetingRecordings':
             if not self.oldSpec:
-                fatalError('Must specify Oldest for Custom SweepSpec "%s"'
-                            % self.specName)
+                msg = "Must specify Oldest for Custom SweepSpec '{}'"
+                fatalError(msg.format(self.specName))
 
 
         # Times should be reasonable e.g., now until 10 years before now
         if self.oldSpec:
-            if self.oldSpec >= now or self.youngSpec >= now:
+            if self.oldSpec >= now or self.youngSpec and self.youngSpec >= now:
                 fatalError('A date >= current date in SweepSpec "%s"' %
                             self.specName)
             longAgo = now - LONG_TIME
@@ -437,7 +437,7 @@ SweepSpec: "%s"
         # Create the output compressed tar archive
         try:
             tar = tarfile.open(self.outFile, "w:bz2")
-        except Exception, info:
+        except Exception as info:
             fatalError('Could not open tarfile "%s" for writing'
                         % self.outFile)
 
@@ -446,7 +446,7 @@ SweepSpec: "%s"
             # Archive it
             try:
                 tar.add(fobj.fileName)
-            except Exception, info:
+            except Exception as info:
                 self.addMsg("Tar error (1): %s" % info)
                 self.addMsg("FileName: %s" % fobj.fileName)
                 self.addMsg("Abandoning this SweepSpec")
@@ -457,7 +457,7 @@ SweepSpec: "%s"
 
         try:
             tar.close()
-        except Exception, info:
+        except Exception as info:
             fatalError('Could not close tarfile "%s"' % self.outFile)
 
         # If here, everything okay, deletion can proceed
@@ -506,7 +506,7 @@ SweepSpec: "%s"
         if self.action == "TruncateArchive":
             try:
                 tar = tarfile.open(self.outFile, "w:bz2")
-            except Exception, info:
+            except Exception as info:
                 fatalError('Could not open tarfile "%s" for writing'
                             % self.outFile)
 
@@ -543,7 +543,7 @@ SweepSpec: "%s"
                         done = True
                 destp.close()
                 srcp.close()
-            except Exception, info:
+            except Exception as info:
                 self.addMsg(
 """WARNING: Unable to create truncation of "%s::%s":
    %s
@@ -571,7 +571,7 @@ SweepSpec: "%s"
                         srcp = open(inFile, "ab+")
                         srcp.truncate(truncPoint)
                         srcp.close()
-                    except Exception, info:
+                    except Exception as info:
                         self.addMsg('Unable to truncate "%s::%s": %s' %
                                      (self.specName, inFile, info))
                         continue
@@ -590,7 +590,7 @@ SweepSpec: "%s"
                 # Archive the truncation
                 try:
                     tar.add(inFile)
-                except Exception, info:
+                except Exception as info:
                     self.addMsg("Tar error: %s" % info)
                     self.addMsg("Abandoning this SweepSpec")
 
@@ -599,7 +599,7 @@ SweepSpec: "%s"
             if not testMode:
                 try:
                     shutil.move(tmpFile, inFile)
-                except Exception, info:
+                except Exception as info:
                     fatalError('Unable to replace original file "%s":\n   %s'
                                     % (inFile, info))
 
@@ -610,7 +610,7 @@ SweepSpec: "%s"
         if self.action == "TruncateArchive":
             try:
                 tar.close()
-            except Exception, info:
+            except Exception as info:
                 fatalError('Could not close tarfile "%s"' % self.outFile)
 
     #----------------------------------------------------------------------
@@ -640,7 +640,7 @@ SweepSpec: "%s"
                 else:
                     self.addMsg('Test mode, not deleting "%s"' %
                                  fileObj.fileName)
-            except Exception, info:
+            except Exception as info:
                 if nameIsDir:
                     self.addMsg("Error removing directory %s: %s" %
                                 (fileObj.fileName, info))
@@ -734,16 +734,16 @@ SweepSpec: "%s"
         # Need a connection to the CDR Server
         session = cdr.login('FileSweeper', cdr.getpw('FileSweeper'))
         if not session:
-            log("ERROR: FileSweeper login to CdrServer failed")
+            FS_LOGGER.error("FileSweeper login to CdrServer failed")
             # But no reason not to do the rest of the sweep
             return
 
         # And a read-only connection to the database
         try:
-            conn = cdrdb.connect()
+            conn = db.connect()
             cursor = conn.cursor()
         except Exception as e:
-            logException(e, "attempting DB connect")
+            FS_LOGGER.exception("attempting DB connect")
 
             # But continue with the sweep
             cleanSession(cursor, session)
@@ -754,7 +754,7 @@ SweepSpec: "%s"
             cursor.execute("SELECT GETDATE()")
             now = cursor.fetchone()[0]
         except Exception as e:
-            logException(e, 'getting DB date')
+            FS_LOGGER.exception("getting DB date")
             cleanSession(cursor, session)
             return
 
@@ -774,7 +774,8 @@ SweepSpec: "%s"
             datetime.datetime.fromtimestamp(self.oldSpec).strftime(isoFmt)
 
         # DEBUG
-        # log("Looking for meeting recordings older than %s" % earlyDate)
+        msg = "Looking for meeting recordings older than %s"
+        FS_LOGGER.debug(msg, earlyDate)
 
         qry = """
         SELECT d.id, d.title
@@ -801,13 +802,13 @@ SweepSpec: "%s"
             cursor.execute(qry)
             rows = cursor.fetchall()
         except Exception as e:
-            logException(e, 'attempting to locate old blobs')
+            FS_LOGGER.exception("attempting to locate old blobs")
             cleanSession(cursor, session)
             return
 
         # If there weren't any, that's normal and okay
         if len(rows) == 0:
-            log("No meeting recordings needed to be deleted")
+            FS_LOGGER.info("No meeting recordings needed to be deleted")
             cleanSession(cursor, session)
             return
 
@@ -833,15 +834,15 @@ SweepSpec: "%s"
                 docObj = cdr.getDoc(session, docId, checkout=checkOut,
                                     getObject=True)
             except Exception as e:
-                logException (e, 'attempting to fetch doc %d' % docId)
+                FS_LOGGER.exception("attempting to fetch doc %d", docId)
                 cleanSession(cursor, session)
                 return
 
             # Test for retrieval error, e.g., locked doc
             err = cdr.checkErr(docObj)
             if err:
-                log("Failed getDoc for CDR ID %s: %s, continuing" %
-                    (docId, err))
+                message = "Failed getDoc for CDR ID %s: %s, continuing"
+                FS_LOGGER.error(message, docId, err)
                 continue
 
 
@@ -879,18 +880,18 @@ SweepSpec: "%s"
                 if not response[0]:
                      errors = cdr.getErrors(response[1], errorsExpected=True,
                                             asSequence=False)
-                     log("ERROR: Saving Media xml for doc %s: %s\n%s"
-                                  % (docObj.id, errors,
-                                  'Aborting expireMeetingRecords()'))
+                     message = "Saving Media xml for doc %s: %s"
+                     FS_LOGGER.error(message, docObj.id, errors)
+                     FS_LOGGER.info("Aborting expireMeetingRecords()")
 
                      # Stop doing this, but continue rest of file sweeps.
                      cleanSession(cursor, session)
                      return
 
             # Log results for this media recording
-            msg = "FileSweeper %s blobs for cdrId: %s\n%s" % \
-                  (actionMsg, docId, title)
-            log(msg)
+            args = actionMsg, docId, title
+            msg = "FileSweeper %s blobs for cdrId: %s\n%s"
+            FS_LOGGER.info(msg, *args)
 
         # Cleanup
         cleanSession(cursor, session)
@@ -961,7 +962,7 @@ def loadConfigFile(fileName):
     """
 
     # Pull the file from the repository if available there
-    cursor = cdrdb.connect("CdrGuest").cursor()
+    cursor = db.connect(user="CdrGuest").cursor()
     cursor.execute("""\
         SELECT v.id, MAX(v.num)
           FROM doc_version v
@@ -975,25 +976,25 @@ def loadConfigFile(fileName):
         fatalError("More than on SweepSpecifications document found")
     elif len(rows) == 1:
         doc_id, version = rows[0]
-        query = cdrdb.Query("doc_version", "xml")
+        query = db.Query("doc_version", "xml")
         query.where(query.Condition("id", doc_id))
         query.where(query.Condition("num", version))
         row = query.execute(cursor).fetchone()
+        args = doc_id, version
         try:
             dom = xml.dom.minidom.parseString(row[0].encode("utf-8"))
-            args = doc_id, version
-            log("loaded config from CDR{:d} version {:d}".format(*args))
+            msg = "loaded config from CDR%d version %d"
+            FS_LOGGER.info(msg, *args)
         except Exception as e:
-            msg = "Failure parsing config document CDR{:d} version {:d}: {}"
-            args = doc_id, version, e
-            fatalError(msg.format(*args))
+            msg = "Failure parsing config document CDR%d version %d"
+            FS_LOGGER.exception(msg, *args)
 
     # Otherwise, parse file from disk (temporary fallback)
     else:
         try:
             dom = xml.dom.minidom.parse(fileName)
-            log("loaded config from {}".format(fileName))
-        except Exception, info:
+            FS_LOGGER.info("loaded config from %s", fileName)
+        except Exception as info:
             fatalError("Error loading config file %s: %s" % (fileName, info))
 
     # List of loaded specifications
@@ -1102,13 +1103,13 @@ def cleanSession(cursor, session):
         try:
             cursor.close()
         except Exception as e:
-            logException(e, 'closing db cursor')
+            FS_LOGGER.exception("failure closing db cursor")
 
     if session:
         try:
             cdr.logout(session)
         except Exception as e:
-            logException(e, 'logging out of session')
+            FS_LOGGER.exception("failure logging out of session")
 
 #----------------------------------------------------------------------
 # Fatal error
@@ -1125,8 +1126,7 @@ def fatalError(msg):
 
     # Add message to log file
     msg = "FATAL error: %s\n" %msg
-    log(msg)
-    logger.error(msg)
+    FS_LOGGER.error(msg)
 
     # Send mail to recipients from command line or registered group
     sender = 'FileSweeper-NoRepy@cdr.cancer.gov'
@@ -1135,8 +1135,7 @@ def fatalError(msg):
             group = "FileSweeper Error Notification"
             recips = CDRTask.get_group_email_addresses(group)
         except Exception as e:
-            logger.exception("Getting email recipients from the CDR")
-            logException(e, "Getting email recipients from the CDR")
+            FS_LOGGER.exception("Getting email recipients from the CDR")
 
     # Message subject
     subject = "FileSweeper failed on %s tier" % TIER
@@ -1153,48 +1152,18 @@ Error message was:
     mailSent = False
     if recips:
         try:
-            cdr.sendMail(sender, recips, subject, errorBody)
+            opts = dict(subject=subject, body=errorBody)
+            cdr.EmailMessage(sender, recips, **opts).send()
             mailSent = True
         except Exception as e:
-            logger.exception("Attempting to send mail for fatal error")
-            logException(e, "Attempting to send mail for fatal error")
+            FS_LOGGER.exception("Attempting to send mail for fatal error")
 
     if mailSent:
-        logger.info("Mail sent to: %s" % recips)
-        log("Mail sent to: %s" % recips)
+        FS_LOGGER.info("Mail sent to: %s", recips)
     else:
-        logger.info("No mail sent")
-        log("No mail sent")
+        FS_LOGGER.info("No mail sent")
 
     raise TaskException(errorBody)
-
-#----------------------------------------------------------------------
-# Log a message
-#----------------------------------------------------------------------
-def log(msg):
-    """
-    Write message to log file and to stderr.
-    """
-    cdr.logwrite(msg, LF)
-    logger.info(msg)
-
-#----------------------------------------------------------------------
-# Log exceptions
-#----------------------------------------------------------------------
-def logException(e, msg, fatal=False):
-    """
-    Log an exception object.
-
-    Pass:
-        e     - Exception object of any type.
-        msg   - Log this as the cause.
-        fatal - True = Abort processing
-    """
-    eMsg = "ERROR, Exception %s. Type=%s, msg=%s" % (msg, type(e), e)
-    if fatal:
-        fatal(eMsg)
-    log(eMsg)
-    logging.error(eMsg)
 
 
 #----------------------------------------------------------------------
@@ -1229,11 +1198,8 @@ remove the file "%s" to enable FileSweeper to run.
 """ % lockFileName)
 
         # Run separator in log file
-        cdr.logwrite("""
-  ----------- Beginning File Sweep -------------
-  Args:
-%s
-""" % sys.argv, LF)
+        FS_LOGGER.info("  %s", " Beginning File Sweep ".center(46, "-"))
+        FS_LOGGER.info("  Args:\n%s", sys.argv)
 
         # Load the configuration file, fatal if fails
         specList = loadConfigFile(configFile)
@@ -1260,7 +1226,7 @@ remove the file "%s" to enable FileSweeper to run.
             # Try to make it
             try:
                 os.makedirs(outputDir)
-            except Exception, info:
+            except Exception as info:
                 fatalError(
                   """Directory "%s" does not exist, can't create it: %s"""
                   % (outputDir, info))
@@ -1283,7 +1249,8 @@ remove the file "%s" to enable FileSweeper to run.
 
                     # elif: next goes here
                     else:
-                        log("ERROR: CustomSpec 'expireMeetingRecordings' unknown")
+                        msg = "CustomSpec 'expireMeetingRecordings' unknown"
+                        FS_LOGGER.error(msg)
 
                     # Custom routines don't use any standard facilities
                     continue
@@ -1291,7 +1258,7 @@ remove the file "%s" to enable FileSweeper to run.
                 # Change to input file root directory
                 try:
                     os.chdir(spec.root)
-                except Exception, info:
+                except Exception as info:
                     spec.addMsg("Unable to cd to root: %s" % info)
                     spec.addMsg('"%s" not processed' % spec.specName)
                     continue
@@ -1311,11 +1278,12 @@ remove the file "%s" to enable FileSweeper to run.
                         if not os.path.exists(fileBase):
                             try:
                                 os.makedirs(fileBase)
-                            except Exception, info:
+                            except Exception as info:
                                 fatalError('Error creating directory "%s": %s'
                                             % (fileBase, info))
                         if not os.path.isdir(fileBase):
-                            fatalError('Config output name "%s" is not a directory')
+                            msg = 'Config output name "{}" is not a directory'
+                            fatalError(msg.format(fileBase))
 
                     # Perform action
                     if spec.action == "Archive":
@@ -1328,27 +1296,24 @@ remove the file "%s" to enable FileSweeper to run.
                     # Back to where we started
                     try:
                         os.chdir(cwd)
-                    except Exception, info:
+                    except Exception as info:
                         fatalError(
          """SweepSpec "%s" could not return to directory "%s" - can't happen"""
                             % (spec.specName, cwd))
 
                 # Report results to log file
-                cdr.logwrite(str(spec), LF)
+                FS_LOGGER.info(str(spec))
 
             # Print a finished separator in log file
             # If a single step takes a very long time (i.e. archiving the
             # Job???? directories) it might appear that nothing is written
             # to the file and therefore the job is done.
-            cdr.logwrite("""
-          ----------- Finished File Sweep -------------
-    """, LF)
+            FS_LOGGER.info("  %s\n", " Finished File Sweep ".center(46, "-"))
 
-        except Exception, info:
+        except Exception as info:
             sys.stderr.write('Exception halted processing on: %s' % str(info))
             traceback.print_exc(file=sys.stderr)
-            logf = open(LF, "a", 0)
-            traceback.print_exc(file=logf)
+            FS_LOGGER.exception("Failure")
 
     # The scheduler (ideally) never exits, so we must remove the
     # lock file explicitly. Don't remove it if the lock might belong

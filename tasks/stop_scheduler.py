@@ -2,8 +2,8 @@
 """
 
 import sys
-from cdr_task_base import CDRTask
-from task_property_bag import TaskPropertyBag
+from .cdr_task_base import CDRTask
+from .task_property_bag import TaskPropertyBag
 
 class Stop(CDRTask):
     """Implements subclass to stop the current CDR Scheduler instance.

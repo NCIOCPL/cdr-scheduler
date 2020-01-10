@@ -3,9 +3,9 @@
 
 import os
 import cdr
-import cdrdb2 as cdrdb
-from cdr_task_base import CDRTask
-from task_property_bag import TaskPropertyBag
+from cdrapi import db
+from .cdr_task_base import CDRTask
+from .task_property_bag import TaskPropertyBag
 
 
 class Sweeper(CDRTask):
@@ -19,9 +19,9 @@ class Sweeper(CDRTask):
         """Launch any publishing jobs which are in the queue.
         """
 
-        conn = cdrdb.connect("CdrPublishing")
+        conn = db.connect(user="CdrPublishing")
         cursor = conn.cursor()
-        query = cdrdb.Query("pub_proc", "id", "pub_subset")
+        query = db.Query("pub_proc", "id", "pub_subset")
         query.where("status = 'Ready'")
         rows = query.execute(cursor).fetchall()
         if rows:

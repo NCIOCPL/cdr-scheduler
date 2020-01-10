@@ -1,13 +1,15 @@
 """Run the scheduler process."""
 
 import logging
+import os
 import sys
 import cdr
-import cdrdb2 as cdrdb
+from cdrapi import db
+from cdrapi.settings import Tier
 
 # Things we need to do before loading the other modules.
 class Config:
-    TIER = cdrdb.h.tier
+    TIER = Tier()
     SENDER = "cdr@cancer.gov"
 
     @classmethod
@@ -18,19 +20,21 @@ class Config:
             level=logging.DEBUG
         )
         try:
-            query = cdrdb.Query("usr e", "e.email")
+            query = db.Query("usr e", "e.email")
             query.join("grp_usr u", "u.usr = e.id")
             query.join("grp g", "g.id = u.grp")
             query.where("g.name = 'Developers Notification'")
-            rows = query.execute(timeout=5).fetchall()
+            rows = query.execute().fetchall()
             cls.RECIPS = [row[0] for row in rows if row[0]]
         except:
             logging.exception("database unavailable - exiting")
             sys.exit(1)
         if cls.RECIPS:
             try:
-                subject = "[%s] CDR Scheduler service restarted" % cls.TIER
-                cdr.sendMail(cls.SENDER, cls.RECIPS, subject, "")
+                subject = f"[{cls.TIER.name}] CDR Scheduler service restarted"
+                opts = dict(subject=subject)
+                message = cdr.EmailMessage(cls.SENDER, cls.RECIPS, **opts)
+                message.send()
             except:
                 pass
 Config.init()
@@ -47,6 +51,8 @@ from ndscheduler.server.handlers import jobs
 from ndscheduler.server import server
 
 class CDRScheduler(server.SchedulerServer):
+
+    STATIC_DIR = r"D:\Inetpub\wwwroot\cgi-bin\scheduler\static"
 
     def __init__(self, scheduler_instance):
         """Launch a web server to handle administering jobs.
@@ -67,8 +73,8 @@ class CDRScheduler(server.SchedulerServer):
 
         self.tornado_settings = dict(
             debug=settings.DEBUG,
-            static_path=settings.STATIC_DIR_PATH,
-            template_path=settings.TEMPLATE_DIR_PATH,
+            static_path=self.STATIC_DIR,
+            template_path=self.STATIC_DIR,
             scheduler_manager=self.scheduler_manager,
             autoreload=False
         )
@@ -93,6 +99,12 @@ class CDRScheduler(server.SchedulerServer):
         Clean up outstanding failed jobs and start the scheduler.
         """
 
+        settings_module = os.environ["NDSCHEDULER_SETTINGS_MODULE"]
+        logging.info("sys.path: %s", sys.path)
+        logging.info("directory: %s", os.getcwd())
+        logging.info("PYTHONPATH: %s", os.environ["PYTHONPATH"])
+        logging.info("SETTINGS MODULE: %s", settings_module)
+        logging.info("STATIC DIR: %s", self.STATIC_DIR)
         self.fix_zombies()
         server.SchedulerServer.start_scheduler(self)
 
@@ -140,7 +152,7 @@ class CDRScheduler(server.SchedulerServer):
         eids = [row.eid for row in datastore.engine.execute(query)]
         logging.info("found %d zombie executions", len(eids))
         for eid in eids:
-            print eid, (repr(eid))
+            print(eid, (repr(eid)))
             logging.info("marking zombie %s as FAILED", eid)
             datastore.update_execution(eid, state=failed, description=desc)
 
@@ -163,8 +175,10 @@ class CDRScheduler(server.SchedulerServer):
             logging.exception("database failure - exiting")
             if Config.RECIPS:
                 try:
-                    subject = "[%s] CDR Scheduler DB failure" % Config.TIER
-                    cdr.sendMail(Config.SENDER, Config.RECIPS, subject, str(e))
+                    subject = f"[{Config.TIER.name}] CDR Scheduler DB failure"
+                    opts = dict(subject=subject, body=str(e))
+                    args = Config.SENDER, Config.RECIPS
+                    message = cdr.EmailMessage(*args, **opts)
                 except:
                     pass
             sys.exit(1)

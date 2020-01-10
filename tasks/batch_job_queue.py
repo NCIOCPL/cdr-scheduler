@@ -4,9 +4,9 @@
 import os
 import cdr
 import cdrbatch
-import cdrdb2 as cdrdb
-from cdr_task_base import CDRTask
-from task_property_bag import TaskPropertyBag
+from cdrapi import db
+from .cdr_task_base import CDRTask
+from .task_property_bag import TaskPropertyBag
 
 
 class Sweeper(CDRTask):
@@ -19,9 +19,9 @@ class Sweeper(CDRTask):
         """Launch any batch jobs which are in the queue.
         """
 
-        conn = cdrdb.connect("CdrPublishing")
+        conn = db.connect(user="CdrPublishing")
         cursor = conn.cursor()
-        query = cdrdb.Query("batch_job", "id", "command")
+        query = db.Query("batch_job", "id", "command")
         query.where(query.Condition("status", cdrbatch.ST_QUEUED))
         jobs = query.execute(cursor).fetchall()
         for job_id, command in jobs:

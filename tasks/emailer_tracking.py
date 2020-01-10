@@ -5,8 +5,8 @@ Perform scheduled updates of electronic mailer tracking documents.
 import lxml.etree as etree
 import requests
 import cdr
-from cdr_task_base import CDRTask
-from task_property_bag import TaskPropertyBag
+from .cdr_task_base import CDRTask
+from .task_property_bag import TaskPropertyBag
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
@@ -76,8 +76,8 @@ class Mailer:
         elif bounced:
             self.changes = "Returned to sender"
         response = cdr.getDoc(session, self.id, "Y", getObject=True)
-        if isinstance(response, basestring):
-            raise Exception(u"getDoc(): %s" % response)
+        if isinstance(response, str):
+            raise Exception("getDoc(): %s" % response)
         self.doc = response
         self.root = etree.XML(self.doc.xml)
 
@@ -91,8 +91,8 @@ class Mailer:
         self.doc.xml = self.transform()
         response = cdr.repDoc(self.session, doc=str(self.doc), **self.REP_OPTS)
         if not response[0]:
-            message = response[1] or u"unexpected failure"
-            raise Exception(u"repDoc(): %s" % message)
+            message = response[1] or "unexpected failure"
+            raise Exception("repDoc(): %s" % message)
         if response[1]:
             self.logger.warn("tracker %s: %s", self.id, response[1])
         self.logger.info("updated tracking document %s", self.id)
@@ -156,7 +156,7 @@ class Mailer:
                     mailer.unlock("Tracker already updated")
                 else:
                     mailer.update_tracker()
-            except Exception, e:
+            except Exception as e:
                 logger.error("failure for mailer %s: %s", node.get("id"), e)
 
         # Clean up and go home.

@@ -3,13 +3,13 @@ Program to create a list of active licensees (Production/Test)
 This job should run as a scheduled job once a month.
 """
 
-from cdr_task_base import CDRTask
+from .cdr_task_base import CDRTask
 from core.exceptions import TaskException
-from task_property_bag import TaskPropertyBag
+from .task_property_bag import TaskPropertyBag
 import datetime
 import requests
 import cdr
-import cdrdb2 as cdrdb
+from cdrapi import db
 
 class ReportTask(CDRTask):
     """
@@ -42,8 +42,8 @@ class Control:
 
     TITLE           Name of the report
     REPORTS         Full set of reports to be run by default (in order).
-    SENDER          First argument to cdr.sendMail().
-    CHARSET         Encoding used by cdr.sendMail().
+    SENDER          First argument to cdr.EmailMessage constructor.
+    CHARSET         Encoding used by HTML page.
     TSTYLE          CSS formatting rules for table elements.
     TO_STRING_OPTS  Options used for serializing HTML report object.
     B               HTML builder module imported at Control class scope.
@@ -101,7 +101,7 @@ class Control:
         self.logger = logger
         if self.mode not in self.MODES:
             raise TaskException("invalid mode %s" % repr(self.mode))
-        self.cursor = cdrdb.connect("CdrGuest", as_dict=True).cursor()
+        self.cursor = db.connect(user="CdrGuest").cursor()
 
     def run(self):
         """
@@ -168,7 +168,9 @@ class Control:
         recips = CDRTask.get_group_email_addresses(group)
         title = "PDQ Distribution Partner List"
         subject = "[%s] %s" % (cdr.Tier().name, title)
-        cdr.sendMail(self.SENDER, recips, subject, report, html=True)
+        opts = dict(subject=subject, body=report, subtype="html")
+        message = cdr.EmailMessage(self.SENDER, recips, **opts)
+        message.send()
         self.logger.info("sent %s", subject)
         self.logger.info("recips: %s", ", ".join(recips))
 
@@ -210,7 +212,7 @@ class Control:
             data = ""
         style = cls.merge_styles(default_styles, **styles)
         if url:
-            return cls.B.TD(cls.B.A(unicode(data), href=url), style=style)
+            return cls.B.TD(cls.B.A(str(data), href=url), style=style)
         return cls.B.TD(data, style=style)
 
     @classmethod
@@ -285,7 +287,7 @@ class Partners:
                 "pa.value AS prod_activation",
                 "pi.value AS prod_inactivation",
                 "un.value AS user_name")
-        query = cdrdb.Query("query_term n", *cols)
+        query = db.Query("query_term n", *cols)
 
         # Get the licensee's name.
         query.where("n.path = '%s'" % self.NAME)
@@ -324,7 +326,9 @@ class Partners:
 
         # Collect and save the Partner objects.
         control.logger.debug("database query:\n%s", query)
-        rows = [row for row in query.execute(control.cursor, timeout=300)]
+        rows = query.execute(control.cursor)
+        cols = [description[0] for description in control.cursor.description]
+        rows = [dict(zip(cols, row)) for row in rows]
         self.licensees = [Partner(self, row) for row in rows]
 
     def table(self):

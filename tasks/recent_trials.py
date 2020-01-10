@@ -12,14 +12,14 @@ JIRA::OCECDR-4096
 """
 
 import cdr
-import cdrdb2 as cdrdb
+from cdrapi import db
 import datetime
 import lxml.etree as etree
 import requests
 import zipfile
-from cdr_task_base import CDRTask
+from .cdr_task_base import CDRTask
 from core.exceptions import TaskException
-from task_property_bag import TaskPropertyBag
+from .task_property_bag import TaskPropertyBag
 
 
 class RefreshTask(CDRTask):
@@ -70,7 +70,7 @@ class Control:
         else:
             self.cutoff = self.get_default_cutoff()
         self.logger = cdr.Logging.get_logger(self.NAME)
-        self.conn = cdrdb.connect(as_dict=True)
+        self.conn = db.connect(as_dict=True)
         self.cursor = self.conn.cursor()
 
     def run(self):
@@ -83,7 +83,7 @@ class Control:
         try:
             if self.fetch():
                 self.record()
-        except Exception, e:
+        except Exception as e:
             self.logger.exception("failed")
             raise TaskException("failed: %s" % e)
 
@@ -120,7 +120,7 @@ class Control:
             if not bytes:
                 self.logger.warn("empty response (no trials?)")
                 return False
-        except Exception, e:
+        except Exception as e:
             error = "Failure downloading trial set using %s: %s" % (url, e)
             raise Exception(error)
 
@@ -137,8 +137,8 @@ class Control:
         Parse the trial documents and record the ones we don't already have.
         """
 
-        rows = cdrdb.Query("ctgov_trial", "nct_id").execute(self.cursor)
-        nct_ids = set([row["nct_id"].upper() for row in rows])
+        rows = db.Query("ctgov_trial", "nct_id").execute(self.cursor)
+        nct_ids = set([row.nct_id.upper() for row in rows])
         zf = zipfile.ZipFile(self.ZIPFILE)
         names = zf.namelist()
         loaded = 0
@@ -151,24 +151,24 @@ class Control:
                     nct_ids.add(trial.nct_id.upper())
                     self.cursor.execute("""\
 INSERT INTO ctgov_trial (nct_id, trial_title, trial_phase, first_received)
-     VALUES (%s, %s, %s, %s)""", (trial.nct_id, trial.title[:1024],
-                                  trial.phase and trial.phase[:20] or None,
-                                  trial.first_received))
+     VALUES (?, ?, ?, ?)""", (trial.nct_id, trial.title[:1024],
+                              trial.phase and trial.phase[:20] or None,
+                              trial.first_received))
                     position = 1
                     for other_id in trial.other_ids:
                         self.cursor.execute("""\
 INSERT INTO ctgov_trial_other_id (nct_id, position, other_id)
-     VALUES (%s, %s, %s)""", (trial.nct_id, position, other_id[:1024]))
+     VALUES (?, ?, ?)""", (trial.nct_id, position, other_id[:1024]))
                         position += 1
                     position = 1
                     for sponsor in trial.sponsors:
                         self.cursor.execute("""\
 INSERT INTO ctgov_trial_sponsor (nct_id, position, sponsor)
-     VALUES (%s, %s, %s)""", (trial.nct_id, position, sponsor[:1024]))
+     VALUES (?, ?, ?)""", (trial.nct_id, position, sponsor[:1024]))
                         position += 1
                     self.conn.commit()
                     loaded += 1
-            except Exception, e:
+            except Exception as e:
                 self.logger.error("%s: %s", name, e)
         self.logger.info("processed %d trials, %d new", len(names), loaded)
 
@@ -182,10 +182,10 @@ INSERT INTO ctgov_trial_sponsor (nct_id, position, sponsor)
         of 2015.
         """
 
-        query = cdrdb.Query("ctgov_trial", "MAX(first_received) as mfr")
-        rows = query.execute(as_dict=True).fetchall()
+        query = db.Query("ctgov_trial", "MAX(first_received) AS mfr")
+        rows = query.execute().fetchall()
         for row in rows:
-            return (row["mfr"] - datetime.timedelta(21)).date()
+            return (row.mfr - datetime.timedelta(21)).date()
         return datetime.date(2015, 1, 1)
 
     @staticmethod

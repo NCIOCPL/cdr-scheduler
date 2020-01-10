@@ -12,11 +12,11 @@ from os import chdir
 
 # Third-party modules
 from dateutil.relativedelta import relativedelta
-from task_property_bag import TaskPropertyBag
+from .task_property_bag import TaskPropertyBag
 
 # Project modules
 import cdr
-from cdr_task_base import CDRTask
+from .cdr_task_base import CDRTask
 
 class Refresh(CDRTask):
     """
@@ -88,9 +88,9 @@ class Refresh(CDRTask):
         cmd = "rsync -e \"%s\" %s ." % (ssh, src)
         fix = r"%s:\cdr\bin\fix-permissions.cmd ." % cdr.WORK_DRIVE
         self.logger.info(cmd)
-        cdr.runCommand(cmd)
+        cdr.run_command(cmd)
         self.logger.info(fix)
-        cdr.runCommand(fix)
+        cdr.run_command(fix)
 
     def normalize(self, line):
         """

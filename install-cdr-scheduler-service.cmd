@@ -5,7 +5,7 @@ SET SERVICE=CDRScheduler
 %NSSM% install %SERVICE% D:\Python\python.exe
 %NSSM% set %SERVICE% AppDirectory D:\cdr\Scheduler
 %NSSM% set %SERVICE% AppParameters D:\cdr\Scheduler\cdr_scheduler.py
-%NSSM% set %SERVICE% AppEnvironmentExtra PYTHONPATH=D:\cdr\lib\Python NDSCHEDULER_SETTINGS_MODULE=settings
+%NSSM% set %SERVICE% AppEnvironmentExtra PYTHONPATH=d:/cdr/lib/Python;d:/cdr NDSCHEDULER_SETTINGS_MODULE=settings
 %NSSM% set %SERVICE% DisplayName CDR Scheduler
 %NSSM% set %SERVICE% Description Manages CDR tasks
 %NSSM% set %SERVICE% AppNoConsole 1

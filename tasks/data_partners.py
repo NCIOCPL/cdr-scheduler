@@ -16,15 +16,13 @@ import lxml.html as html
 import lxml.html.builder as B
 import requests
 import cdr
-import settings
-from cdrutil import sendMail
-from cdr_task_base import CDRTask
+from .cdr_task_base import CDRTask
 from core.exceptions import TaskException
-from task_property_bag import TaskPropertyBag
+from .task_property_bag import TaskPropertyBag
 from cdrapi.users import Session
 from cdrapi import db
 from cdrapi.docs import Doc
-
+from html import escape as html_escape
 
 class Notify(CDRTask):
     """
@@ -33,7 +31,7 @@ class Notify(CDRTask):
     """
 
     LOGNAME = "data-partner-notification"
-    SENDER = u"NCI PDQ\u00ae Operator <NCIPDQoperator@mail.nih.gov>"
+    SENDER = "NCI PDQ\u00ae Operator <NCIPDQoperator@mail.nih.gov>"
     MAX_TRIES = 5
     DELAY = 5
     MODES = "test", "live"
@@ -133,22 +131,25 @@ class Notify(CDRTask):
             exception propagated by sendmail if too many attempts fail
         """
 
-        if isinstance(recips, basestring):
+        if isinstance(recips, str):
             if not cdr.isProdHost() or self.test:
-                extra = u"In live prod mode, would have gone to %r" % recips
+                extra = "In live prod mode, would have gone to %r" % recips
                 if Notify.test_recips is None:
                     group = "Test Publishing Notification"
                     Notify.test_recips = self.get_group_email_addresses(group)
                 recips = Notify.test_recips
                 self.logger.info("using recips: %r", recips)
-                message = u"<h3>%s</h3>\n%s" % (cgi.escape(extra), message)
+                message = "<h3>%s</h3>\n%s" % (html_escape(extra), message)
             else:
                 recips = [recips]
         tries, delay = 0, self.DELAY
         while True:
             self.logger.debug("top of send(%r)", recips)
             try:
-                msg = sendMail(self.SENDER, recips, subject, message, True)
+                opts = dict(subject=subject, body=message, subtype="html")
+                msg = cdr.EmailMessage(self.SENDER, recips, **opts)
+                msg.send()
+                msg = str(msg)
                 if self.log_messages:
                     self.logger.debug(msg)
                 return msg
@@ -282,7 +283,7 @@ class Notify(CDRTask):
                     row = B.TR(B.TD(name, style="text-align: right;"))
                     table.append(row)
                 row.append(B.TD(count, style="text-align: right;"))
-            return html.tostring(table)
+            return html.tostring(table, encoding="html")
 
 
 class Contact:
@@ -345,7 +346,7 @@ class Contact:
         self.renewed = cdr.get_text(node.find("renewal_date"))
         self.notified = cdr.get_text(node.find("notified_date"))
         self.org_id = cdr.get_text(node.find("org_id"))
-        self.display = u"%s at %s <%s>" % (self.person, self.org, self.email)
+        self.display = "%s at %s <%s>" % (self.person, self.org, self.email)
         self.expired = self.expiring = False
         if self.type == "T":
             start = self.renewed or self.activated
@@ -380,7 +381,7 @@ class Contact:
         """
 
         if self.notified >= str(self.control.job.started):
-            self.logger.info(u"%s notified %s", self.display, self.notified)
+            self.logger.info("%s notified %s", self.display, self.notified)
             return
         if self.expired:
             self.disable()
@@ -399,9 +400,9 @@ class Contact:
         to record that the notification has been sent.
         """
 
-        summary = u"%s: %s" % (self.type_string, self.display)
+        summary = "%s: %s" % (self.type_string, self.display)
         if self.expiring:
-            summary += u" (warning notice sent)"
+            summary += " (warning notice sent)"
         self.logger.info("notifying %s", self.display)
         self.report(summary)
         self.send(self.job.subject, self.job.message)
@@ -422,8 +423,8 @@ class Contact:
         """
 
         self.logger.info("warning %s of pending expiration", self.display)
-        subject = u"Warning notice: NCI PDQ Test Account for %s" % self.org
-        subject = u"%s, %s" % (subject, self.job.date_and_week())
+        subject = "Warning notice: NCI PDQ Test Account for %s" % self.org
+        subject = "%s, %s" % (subject, self.job.date_and_week())
         template = cdr.getControlValue("Publishing", "test-partner-warning")
         message = template.replace("@@EXPIRING@@", str(self.expiring)[:10])
         self.send(subject, message)
@@ -445,8 +446,8 @@ class Contact:
 
         self.logger.info("disabling %s", self.display)
         self.report("Disabled test account for %s" % self.display)
-        subject = u"Expiration notice: NCI PDQ Test Account for %s" % self.org
-        subject = u"%s, %s" % (subject, self.job.date_and_week())
+        subject = "Expiration notice: NCI PDQ Test Account for %s" % self.org
+        subject = "%s, %s" % (subject, self.job.date_and_week())
         message = cdr.getControlValue("Publishing", "test-partner-disabled")
         self.send(subject, message)
         self.expire()
@@ -494,7 +495,7 @@ class Contact:
         Send an email message to the data partner's contact.
         """
 
-        recip = u"%s <%s>" % (self.person, self.email)
+        recip = "%s <%s>" % (self.person, self.email)
         self.control.send(recip, subject, message)
 
     def report(self, line):
@@ -502,19 +503,17 @@ class Contact:
         Append a line to the summary report file for the operators.
         """
 
-        if isinstance(line, unicode):
-            line = line.encode("utf-8")
-        with open(self.control.job.report_path, "a") as fp:
-            fp.write("<li>%s</li>\n" % cgi.escape(line))
+        with open(self.control.job.report_path, "a", encoding="utf-8") as fp:
+            fp.write("<li>%s</li>\n" % html_escape(line))
 
     def notify_ops(self, subject, message):
         """
         Send an copy of a warning or expiration message to the operators.
         """
 
-        contact = cgi.escape(self.display)
-        lead = u"The following message was sent to %s" % contact
-        message = u"<p><i>%s</i></p>%s" % (lead, message)
+        contact = html_escape(self.display)
+        lead = "The following message was sent to %s" % contact
+        message = "<p><i>%s</i></p>%s" % (lead, message)
         self.control.send(self.control.ops, subject, message)
         self.logger.debug("copied ops on %r", subject)
 

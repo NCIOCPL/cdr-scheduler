@@ -15,11 +15,11 @@ from lxml import etree
 import openpyxl
 import requests
 from core.exceptions import TaskException
-from task_property_bag import TaskPropertyBag
+from .task_property_bag import TaskPropertyBag
 
 # Project modules
 import cdr
-from cdr_task_base import CDRTask
+from .cdr_task_base import CDRTask
 
 class Report(CDRTask):
     """
@@ -184,6 +184,7 @@ class Report(CDRTask):
         self.sync_logs()
         with gzip.open(self.log_path) as fp:
             for line in fp.readlines():
+                line = str(line, "utf-8")
                 if "]: open " in line:
                     request = Request(line, sids, self.orgs)
                     if request.user in self.NON_PARTNERS:
@@ -222,9 +223,9 @@ class Report(CDRTask):
         cwd = os.getcwd()
         os.chdir(self.Month.LOGDIR)
         self.logger.info(cmd)
-        cdr.runCommand(cmd)
+        cdr.run_command(cmd)
         self.logger.info(fix)
-        cdr.runCommand(fix)
+        cdr.run_command(fix)
         os.chdir(cwd)
 
     def make_report(self, requests):
@@ -283,7 +284,9 @@ class Report(CDRTask):
         )
         body = "\n".join(body)
         recips = self.recips
-        cdr.sendMail(self.SENDER, recips, subject, body, attachments=[book])
+        opts = dict(subject=subject, body=body, attachments=[book])
+        message = cdr.EmailMessage(self.SENDER, recips, **opts)
+        message.send()
         self.logger.info("sent report to %s", ", ".join(recips))
 
     class Month:

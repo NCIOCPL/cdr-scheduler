@@ -2,7 +2,7 @@
 
 import logging
 
-from cdr_job_base import CDRJob
+from .cdr_job_base import CDRJob
 from core.const import TaskStatus
 from core.exceptions import TaskException
 

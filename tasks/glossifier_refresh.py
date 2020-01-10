@@ -31,10 +31,10 @@ import socket
 from lxml import etree
 import requests
 import cdr
-import cdrdb2 as cdrdb
+from cdrapi import db
 from cdrapi.settings import Tier
-from cdr_task_base import CDRTask
-from task_property_bag import TaskPropertyBag
+from .cdr_task_base import CDRTask
+from .task_property_bag import TaskPropertyBag
 
 class Task(CDRTask):
     """
@@ -56,8 +56,8 @@ class Task(CDRTask):
 class Terms:
 
     SERVER = socket.gethostname().split(".")[0]
-    SENDER = u"cdr@{}.nci.nih.gov".format(SERVER.lower())
-    SUBJECT = u"DUPLICATE GLOSSARY TERM NAME MAPPINGS ON " + SERVER.upper()
+    SENDER = "cdr@{}.nci.nih.gov".format(SERVER.lower())
+    SUBJECT = "DUPLICATE GLOSSARY TERM NAME MAPPINGS ON " + SERVER.upper()
     UNREPORTED = set(["tpa", "cab", "ctx", "receptor"])
     GROUP = "glossary-servers"
 
@@ -70,7 +70,7 @@ class Terms:
         self.logger = logger
         if self.logger is None:
             self.logger = cdr.Logging.get_logger("glossifier", level="debug")
-        self.conn = cdrdb.connect()
+        self.conn = db.connect()
         self.cursor = self.conn.cursor()
 
     def save(self):
@@ -83,7 +83,7 @@ class Terms:
         self.cursor.execute("""\
             UPDATE glossifier
                SET refreshed = GETDATE(),
-                   terms = %s
+                   terms = ?
              WHERE pk = 1""", names)
         self.conn.commit()
 
@@ -93,10 +93,10 @@ class Terms:
         """
 
         failures = []
-        success = u"Sent glossary to server %r at %s"
-        failure = u"Failure sending glossary to server %r at %s: %s"
-        for alias, base in self.servers.iteritems():
-            url = u"{}/pdq/api/glossifier/refresh".format(base)
+        success = "Sent glossary to server %r at %s"
+        failure = "Failure sending glossary to server %r at %s: %s"
+        for alias, base in self.servers.items():
+            url = "{}/pdq/api/glossifier/refresh".format(base)
             try:
                 response = requests.post(url, json=self.data, auth=self.auth)
                 if response.ok:
@@ -118,10 +118,11 @@ class Terms:
             subject = "[{}] Failure sending glossary information".format(tier)
             lines = []
             for args in failures:
-                lines.append(u"Server {!r} at {}: {}".format(*args))
-            body = u"\n".join(lines)
-            cdr.sendMail(self.SENDER, recips, subject, body, False, True)
-            self.logger.error(u"send failure notice sent to %r", recips)
+                lines.append("Server {!r} at {}: {}".format(*args))
+            body = "\n".join(lines)
+            opts = dict(subject=subject, body=body)
+            message = cdr.EmailMessage(self.SENDER, recips, **opts)
+            self.logger.error("send failure notice sent to %r", recips)
 
     @property
     def auth(self):
@@ -162,7 +163,7 @@ class Terms:
             tags = dict(en="TermDefinition", es="TranslatedTermDefinition")
             for lang in tags:
                 path = "/GlossaryTermConcept/{}/Dictionary".format(tags[lang])
-                query = cdrdb.Query("query_term_pub", "doc_id", "value")
+                query = db.Query("query_term_pub", "doc_id", "value")
                 query.where(query.Condition("path", path))
                 rows = query.execute(self.cursor).fetchall()
                 self.logger.debug("fetched %d %s dictionaries", len(rows), lang)
@@ -184,11 +185,11 @@ class Terms:
 
         if not hasattr(self, "_data"):
             names = dict()
-            for name, docs in self.names.iteritems():
+            for name, docs in self.names.items():
                 names[name] = dict()
-                for doc_id, languages in docs.iteritems():
+                for doc_id, languages in docs.items():
                     names[name][doc_id] = dict()
-                    for language, dictionaries in languages.iteritems():
+                    for language, dictionaries in languages.items():
                         names[name][doc_id][language] = list(dictionaries)
             self._data = names
         return self._data
@@ -289,7 +290,7 @@ class Terms:
                 ("query_term_pub q", "q.doc_id = v.id"),
             )
             path = "/GlossaryTermName/GlossaryTermConcept/@cdr:ref"
-            query = cdrdb.Query("doc_version v", *columns)
+            query = db.Query("doc_version v", *columns)
             for args in joins:
                 query.join(*args)
             query.where(query.Condition("q.path", path))
@@ -314,23 +315,25 @@ class Terms:
         recips = CDRTask.get_group_email_addresses("GlossaryDupGroup")
         if not recips:
             raise Exception("no recipients found for glossary dup message")
-        body = [u"The following {:d} sets of ".format(len(self.dups)),
-                u"duplicate glossary mappings were found in the CDR ",
+        body = ["The following {:d} sets of ".format(len(self.dups)),
+                "duplicate glossary mappings were found in the CDR ",
                 "on {}. ".format(self.SERVER.upper()),
-                u"Mappings for any phrase + language + dictionary must ",
-                u"be unique. ",
-                u"Please correct the data so that this requirement is met. ",
-                u"You may need to look at the External Map Table for ",
-                u"Glossary Terms to find some of the mappings.\n"]
-        template = u"\n{} (language={!r} dictionary={!r})\n"
+                "Mappings for any phrase + language + dictionary must ",
+                "be unique. ",
+                "Please correct the data so that this requirement is met. ",
+                "You may need to look at the External Map Table for ",
+                "Glossary Terms to find some of the mappings.\n"]
+        template = "\n{} (language={!r} dictionary={!r})\n"
         for key in sorted(self.dups):
             name, language, dictionary = key
             args = name.upper(), language, dictionary
             body.append(template.format(*args))
             for doc_id in self.dups[key]:
-                body.append(u"\tCDR{:010d}\n".format(doc_id))
-        body = u"".join(body)
-        cdr.sendMail(self.SENDER, recips, self.SUBJECT, body, False, True)
+                body.append("\tCDR{:010d}\n".format(doc_id))
+        body = "".join(body)
+        opts = dict(subject=self.SUBJECT, body=body)
+        message = cdr.EmailMessage(self.SENDER, recips, **opts)
+        message.send()
         self.logger.info("duplicate mapping notification sent to %r", recips)
 
 
@@ -395,7 +398,7 @@ class Term:
 
         if self.EXTRA[language] is None:
             usage = self.USAGES[language]
-            query = cdrdb.Query("external_map m", "m.value", "m.doc_id")
+            query = db.Query("external_map m", "m.value", "m.doc_id")
             query.join("external_map_usage u", "u.id = m.usage")
             query.where(query.Condition("u.name", usage))
             rows = query.execute(self.terms.cursor).fetchall()
@@ -444,8 +447,8 @@ class Term:
 
         def __init__(self, value):
             self.value = value
-            value = value.replace(u"\u2019", u"'").lower().strip()
-            self.key = re.sub(u"\\s+", " ", value)
+            value = value.replace("\u2019", "'").lower().strip()
+            self.key = re.sub("\\s+", " ", value)
 
 
 if __name__ == "__main__":
@@ -459,13 +462,13 @@ if __name__ == "__main__":
     opts = parser.parse_args()
     terms = Terms()
     if opts.json:
-        print(json.dumps(terms.data, indent=2))
+        print((json.dumps(terms.data, indent=2)))
     else:
         t = pprint.pformat(terms.names, indent=4)
-        print(re.sub(r"set\(\[\s+", "set([", t).replace(" u'es'", " 'es'"))
+        print((re.sub(r"set\(\[\s+", "set([", t).replace(" u'es'", " 'es'")))
         if opts.show_dups:
-            print("=" * 60)
-            print("DUPLICATES".center(60))
-            print("=" * 60)
+            print(("=" * 60))
+            print(("DUPLICATES".center(60)))
+            print(("=" * 60))
             for key in terms.dups:
-                print(repr((key, terms.dups[key])))
+                print((repr((key, terms.dups[key]))))
