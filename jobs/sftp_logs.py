@@ -1,5 +1,4 @@
-"""
-Sync SFTP logs with local file system
+"""Sync SFTP logs with local file system
 
 Also adds any new entries to the normalized cumulative log file.
 """
@@ -12,15 +11,14 @@ from os import chdir
 
 # Third-party modules
 from dateutil.relativedelta import relativedelta
-from .task_property_bag import TaskPropertyBag
 
 # Project modules
 import cdr
-from .cdr_task_base import CDRTask
+from .base_job import Job
 
-class Refresh(CDRTask):
+class Refresh(Job):
     """
-    Task for refreshing local mirror of sftp pdq log files
+    Job for refreshing local mirror of sftp pdq log files
 
     Attributes:
         logger - object for recording what we do
@@ -29,15 +27,7 @@ class Refresh(CDRTask):
     LOGNAME = "sftp-log-refresh"
     SYNCDIR = cdr.BASEDIR + "/sftp_log"
 
-    def __init__(self, parms, data):
-        """
-        Create a logger and initialize the base class
-        """
-
-        CDRTask.__init__(self, parms, data)
-        self.months = self.map_months()
-
-    def Perform(self):
+    def run(self):
         """
         Sync the log directory and top up the cumulative log file
         """
@@ -47,11 +37,10 @@ class Refresh(CDRTask):
         self.sync_logs()
         self.refresh_cumulative_log()
         self.logger.info("Refresh completed")
-        return TaskPropertyBag()
 
-    def map_months(self):
-        """
-        Construct a map of month abbreviations to year, month tuples
+    @property
+    def months(self):
+        """Construct a map of month abbreviations to year, month tuples
 
         Once the old log data without the year field has flushed
         through the system, this can be simplified (and made more
@@ -63,13 +52,14 @@ class Refresh(CDRTask):
           dictionary with entries like "Jan" -> (2018, 1)
         """
 
-        months = {}
-        today = date.today()
-        while len(months) < 12:
-            name = today.strftime("%b")
-            months[name] = today.year, today.month
-            today -= relativedelta(months=1)
-        return months
+        if not hasattr(self, "_months"):
+            self._months = {}
+            today = date.today()
+            while len(self._months) < 12:
+                name = today.strftime("%b")
+                self._months[name] = today.year, today.month
+                today -= relativedelta(months=1)
+        return self._months
 
     def sync_logs(self):
         """
@@ -150,6 +140,7 @@ class Refresh(CDRTask):
         new_lines = []
         with gzip.open(monthlies[-1]) as fp:
             for line in fp.readlines():
+                line = line.decode("utf-8")
                 if self.wanted(line):
                     line = self.normalize(line)
                     if line not in entries:
@@ -171,8 +162,8 @@ class Refresh(CDRTask):
         if new_lines:
             with open("cumulative.log", "ab") as fp:
                 for line in new_lines:
-                    fp.write(line)
-                    fp.write("\n")
+                    fp.write(line.encode("utf-8"))
+                    fp.write(b"\n")
 
 
 if __name__ == "__main__":
@@ -180,4 +171,4 @@ if __name__ == "__main__":
     Support command-line testing.
     """
 
-    Refresh({}, {}).Perform()
+    Refresh(None, "Refresh SFTP Logs").run()

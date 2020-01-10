@@ -1,5 +1,4 @@
-"""
-Refresh the terms dictionary used by the glossifier service.
+"""Refresh the terms dictionary used by the glossifier service.
 
 This is a rewritten version of the script which ran on Linux.
 There will be some differences in the glossification results.
@@ -33,25 +32,25 @@ import requests
 import cdr
 from cdrapi import db
 from cdrapi.settings import Tier
-from .cdr_task_base import CDRTask
-from .task_property_bag import TaskPropertyBag
+from .base_job import Job
 
-class Task(CDRTask):
+
+class Task(Job):
     """
     Implements subclass to repopulate the glossifier mappings.
     """
 
     LOGNAME = "glossifier"
 
-    def Perform(self):
-        log_level = self.jobParams.get("log-level", "info")
-        self.logger = cdr.Logging.get_logger(self.LOGNAME, level=log_level)
-        terms = Terms(self.logger)
+    def run(self):
+        level = self.opts.get("log-level", "INFO")
+        self.logger.setLevel(level.upper())
+        terms = Terms(self.logger, self.opts.get("recip"))
         terms.send()
         terms.save()
         if terms.dups:
             terms.report_duplicates()
-        return TaskPropertyBag()
+
 
 class Terms:
 
@@ -61,13 +60,20 @@ class Terms:
     UNREPORTED = set(["tpa", "cab", "ctx", "receptor"])
     GROUP = "glossary-servers"
 
-    def __init__(self, logger=None):
+    def __init__(self, logger=None, recip=None):
         """
         Collect the glossary term information.
+
+        Pass:
+            logger - the scheduled job's logger (unless testing from the
+                     command line)
+            recip - optional email address for testing without spamming
+                    the users
         """
 
         self.tier = Tier()
         self.logger = logger
+        self.recip = recip
         if self.logger is None:
             self.logger = cdr.Logging.get_logger("glossifier", level="debug")
         self.conn = db.connect()
@@ -111,7 +117,10 @@ class Terms:
                 failures.append(args)
         if failures:
             group = "Developers Notification"
-            recips = CDRTask.get_group_email_addresses(group)
+            if self.recip:
+                recips = [self.recip]
+            else:
+                recips = CDRTask.get_group_email_addresses(group)
             if not recips:
                 raise Exception("no recips found for glossary failure message")
             tier = self.tier.name
@@ -312,7 +321,10 @@ class Terms:
         if not self.dups:
             self.logger.error("no duplicates to report")
             return
-        recips = CDRTask.get_group_email_addresses("GlossaryDupGroup")
+        if self.recip:
+            recips = [self.recip]
+        else:
+            recips = CDRTask.get_group_email_addresses("GlossaryDupGroup")
         if not recips:
             raise Exception("no recipients found for glossary dup message")
         body = ["The following {:d} sets of ".format(len(self.dups)),

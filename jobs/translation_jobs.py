@@ -5,30 +5,18 @@ Logic for reports on the translation job queues
 import cdr
 from cdrapi import db
 import datetime
+from .base_job import Job
 
-from .cdr_task_base import CDRTask
-from .task_property_bag import TaskPropertyBag
-
-class ReportTask(CDRTask):
+class ReportTask(Job):
     """
     Subclass for managing scheduled summary translation job reports.
     """
 
     LOGNAME = "scheduled_translation_job_report"
 
-    def __init__(self, parms, data):
-        """
-        Initialize the base class then instantiate our Control object,
-        which does all the real work. The data argument is ignored.
-        """
+    def run(self):
+        Control(self.opts, self.logger).run()
 
-        CDRTask.__init__(self, parms, data)
-        self.control = Control(parms, self.logger)
-
-    def Perform(self):
-        "Hand off the real work to the Control object."
-        self.control.run()
-        return TaskPropertyBag()
 
 class ReportTools:
     """
@@ -139,6 +127,7 @@ class Control(ReportTools):
     test            Convenience Boolean reflecting whether mode is 'test'.
     logger          Object for recording log information about the report.
     cursor          Object for submitting queries to the database.
+    recip           Optional email address to divert messages for testing.
     """
 
     DOCTYPES = "Summary", "Media", "Glossary"
@@ -153,32 +142,90 @@ class Control(ReportTools):
             recipient list for report
         """
 
-        self.logger = logger
-        self.mode = options["mode"]
-        self.doctype = options.get("doctype", "Summary")
-        self.schedule = options.get("schedule", "nightly")
-        message = "Unsupported document type {!r}".format(self.doctype)
-        assert self.doctype in self.DOCTYPES, message
-        self.test = self.mode == "test"
-        title = "Translation Jobs Queue Report"
-        if self.schedule == "weekly":
-            title = "Documents Ready For Translation"
-        self.title = "{} {}".format(self.doctype, title)
-        self.cursor = db.connect(user="CdrGuest").cursor()
+        self.__logger = logger
+        self.__opts = options
 
     def run(self):
         "Generate and email the report."
         self.logger.info("*** top of %s %s run", self.schedule, self.doctype)
         if self.schedule == "nightly":
-            self.logger.info("loading users")
-            for user in self.load_users():
+            for user in self.users:
                 user.send_report(self)
         else:
-            jobs = self.load_jobs()
-            self.send_report(jobs)
-        self.logger.info("%s, %s job completed", self.schedule, self.doctype)
+            self.send_report(self.jobs)
+        self.logger.info("%s %s job completed", self.schedule, self.doctype)
 
-    def load_users(self):
+    @property
+    def logger(self):
+        return self.__logger
+
+    @property
+    def mode(self):
+        if not hasattr(self, "_mode"):
+            self._mode = self.__opts["mode"]
+        return self._mode
+
+    @property
+    def doctype(self):
+        if not hasattr(self, "_doctype"):
+            self._doctype = self.__opts.get("doctype", "Summary")
+            if self._doctype not in self.DOCTYPES:
+                raise(f"Unsupported document type {self._doctype!r}")
+        return self._doctype
+
+    @property
+    def recip(self):
+        """Optional email address for testing."""
+
+        if not hasattr(self, "_recip"):
+            self._recip = self.__opts.get("recip")
+        return self._recip
+
+    @property
+    def schedule(self):
+        if not hasattr(self, "_schedule"):
+            self._schedule = self.__opts.get("schedule", "nightly")
+        return self._schedule
+
+    @property
+    def test(self):
+        return self.mode == "test"
+
+    @property
+    def title(self):
+        if not hasattr(self, "_title"):
+            if self.schedule == "weekly":
+                title = "Documents Ready For Translation"
+            else:
+                title = "Translation Jobs Queue Report"
+            self._title = f"{self.doctype} {title}"
+        return self._title
+
+    @property
+    def cursor(self):
+        if not hasattr(self, "_cursor"):
+            self._cursor = db.connect(user="CdrGuest").cursor()
+        return self._cursor
+
+    @property
+    def jobs(self):
+        """
+        Find the jobs which have the state "Ready for Translation"
+
+        Hands off much of the work to specialized methods for
+        different document types. Summaries currently not
+        supported.
+
+        Return:
+          Sequence of tuples of values
+        """
+
+        if not hasattr(self, "_jobs"):
+            self._jobs = getattr(self, f"_load_{self.doctype.lower()}_jobs")()
+        return self._jobs
+
+    @property
+    def users(self):
         """
         Collect information on users with active translation jobs
 
@@ -189,26 +236,29 @@ class Control(ReportTools):
           sequence of `User` objects
         """
 
-        users = []
-        missing_email = set()
-        rows = getattr(self, "load_{}_users".format(self.doctype.lower()))()
-        for doc_id, title, state, name, fullname, uid, email, date in rows:
-            if email:
-                if not users or uid != users[-1].uid:
-                    user = User(uid, name, fullname, email)
-                    users.append(user)
-                user.add_job(state, date, doc_id, title)
-            elif uid not in missing_email:
-                self.logger.error("user %s has no email address" % name)
-                missing_email.add(uid)
-        return users
+        if not hasattr(self, "_users"):
+            self.logger.info("loading users")
+            users = []
+            missing_email = set()
+            rows = getattr(self, f"_load_{self.doctype.lower()}_users")()
+            for doc_id, title, state, name, fullname, uid, email, date in rows:
+                if email:
+                    if not users or uid != users[-1].uid:
+                        user = User(uid, name, fullname, email, self.recip)
+                        users.append(user)
+                    user.add_job(state, date, doc_id, title)
+                elif uid not in missing_email:
+                    self.logger.error("user %s has no email address" % name)
+                    missing_email.add(uid)
+            self._users = users
+        return self._users
 
-    def load_summary_users(self):
+    def _load_summary_users(self):
         """
         Collect information on users with active Summary translation jobs
 
         Return:
-          sequence of `User` objects
+          sequence of database resultset rows
         """
 
         fields = ("d.id", "d.title", "s.value_name", "u.name", "u.fullname",
@@ -221,11 +271,12 @@ class Control(ReportTools):
         query.order("u.id", "s.value_pos", "j.state_date", "d.title")
         return query.execute(self.cursor).fetchall()
 
-    def load_media_users(self):
+    def _load_media_users(self):
         """
         Collect information on users with active Media translation jobs
 
         Return:
+          sequence of database resultset rows
           sequence of `User` objects
         """
 
@@ -238,13 +289,14 @@ class Control(ReportTools):
         query.order("u.id", "s.value_pos", "j.state_date", "d.title")
         return query.execute(self.cursor).fetchall()
 
-    def load_glossary_users(self):
+    def _load_glossary_users(self):
         """
         Collect information on users with active Glossary translation jobs
 
         Documents can be of type GlossaryTermName or GlossaryTermConcept.
 
         Return:
+          sequence of database resultset rows
           sequence of `User` objects
         """
 
@@ -258,13 +310,13 @@ class Control(ReportTools):
         rows = query.execute(self.cursor).fetchall()
         users = {}
         for doc_id, doc_type, state, name, full, uid, pos, email, date in rows:
-            title = self.get_glossary_title(doc_id, doc_type)
+            title = self.__get_glossary_title(doc_id, doc_type)
             key = uid, pos, str(date)[:10], title
             values = doc_id, title, state, name, full, uid, email, date
             users[key] = values
         return [users[key] for key in sorted(users)]
 
-    def get_glossary_title(self, doc_id, doc_type):
+    def __get_glossary_title(self, doc_id, doc_type):
         """
         Fetch or construct title for Glossary document
 
@@ -290,21 +342,7 @@ class Control(ReportTools):
         query.where(query.Condition("id", doc_id))
         return query.execute(self.cursor).fetchone()[0]
 
-    def load_jobs(self):
-        """
-        Find the jobs which have the state "Ready for Translation"
-
-        Hands off much of the work to specialized methods for
-        different document types. Summaries currently not
-        supported.
-
-        Return:
-          Sequence of tuples of values
-        """
-
-        return getattr(self, "load_{}_jobs".format(self.doctype.lower()))()
-
-    def load_media_jobs(self):
+    def _load_media_jobs(self):
         """
         Find Media jobs which have the state "Ready for Translation"
 
@@ -312,7 +350,7 @@ class Control(ReportTools):
           Sequence of tuples of values
         """
 
-        fields = ("d.title", "d.id", "u.fullname", "j.state_date")
+        fields = "d.title", "d.id", "u.fullname", "j.state_date"
         query = db.Query("media_translation_job j", *fields)
         query.join("usr u", "u.id = j.assigned_to")
         query.join("document d", "d.id = j.english_id")
@@ -321,7 +359,7 @@ class Control(ReportTools):
         query.order("d.title")
         return query.execute(self.cursor).fetchall()
 
-    def load_glossary_jobs(self):
+    def _load_glossary_jobs(self):
         """
         Find Glossary jobs which have the state "Ready for Translation"
 
@@ -333,7 +371,7 @@ class Control(ReportTools):
           Sequence of tuples of values
         """
 
-        fields = ("d.id", "t.name", "u.fullname", "j.state_date")
+        fields = "d.id", "t.name", "u.fullname", "j.state_date"
         query = db.Query("glossary_translation_job j", *fields)
         query.join("usr u", "u.id = j.assigned_to")
         query.join("document d", "d.id = j.doc_id")
@@ -343,7 +381,7 @@ class Control(ReportTools):
         jobs = {}
         rows = query.execute(self.cursor).fetchall()
         for doc_id, doc_type, name, date in rows:
-            title = self.get_glossary_title(doc_id, doc_type)
+            title = self.__get_glossary_title(doc_id, doc_type)
             jobs[(title.lower(), doc_id)] = (title, doc_id, name, date)
         return [jobs[key] for key in sorted(jobs)]
 
@@ -357,10 +395,13 @@ class Control(ReportTools):
 
         report = self.create_report(jobs)
         self.logger.debug("report\n%s", report)
-        group = "Spanish Translation Leads"
-        if self.test:
-            group = "Test Translation Queue Recips"
-        recips = CDRTask.get_group_email_addresses(group)
+        if self.recip:
+            recips = [self.recip]
+        else:
+            group = "Spanish Translation Leads"
+            if self.test:
+                group = "Test Translation Queue Recips"
+            recips = Job.get_group_email_addresses(group)
         if recips:
             subject = "[%s] %s" % (cdr.Tier().name, self.title)
             opts = dict(subject=subject, body=report, subtype="html")
@@ -417,11 +458,12 @@ class User(ReportTools):
     Translator who will receive a nightly jobs report
     """
 
-    def __init__(self, uid, name, fullname, email):
+    def __init__(self, uid, name, fullname, email, recip):
         self.uid = uid
         self.name = name
         self.fullname = fullname
         self.email = email
+        self.recip = recip
         self.jobs = []
 
     def add_job(self, state, date, doc_id, title):
@@ -430,9 +472,11 @@ class User(ReportTools):
     def send_report(self, control):
         report = self.create_report(control)
         control.logger.debug("report\n%s", report)
-        if control.test:
+        if self.recip:
+            recips = [self.recip]
+        elif control.test:
             group = "Test Translation Queue Recips"
-            recips = CDRTask.get_group_email_addresses(group)
+            recips = Job.get_group_email_addresses(group)
         else:
             recips = [self.email]
         if recips:
@@ -440,7 +484,6 @@ class User(ReportTools):
             opts = dict(subject=subject, body=report, subtype="html")
             message = cdr.EmailMessage(self.SENDER, recips, **opts)
             message.send()
-
             control.logger.info("sent %s", subject)
             control.logger.info("recips: %s", ", ".join(recips))
         else:
@@ -505,8 +548,6 @@ class User(ReportTools):
 def main():
     """
     Make it possible to run this task from the command line.
-    You'll have to modify the PYTHONPATH environment variable
-    to include the parent of this file's directory.
     """
 
     import argparse
@@ -520,6 +561,7 @@ def main():
                         default="info", help="verbosity of logging")
     parser.add_argument("--doctype", choices=Control.DOCTYPES)
     parser.add_argument("--schedule", choices=Control.SCHEDULES)
+    parser.add_argument("--recip")
     args = parser.parse_args()
     opts = dict([(k.replace("_", "-"), v) for k, v in args._get_kwargs()])
     logging.basicConfig(format=cdr.Logging.FORMAT, level=args.log_level.upper())

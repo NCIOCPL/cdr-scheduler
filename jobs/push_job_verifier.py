@@ -5,18 +5,17 @@ import datetime
 import cdr
 from cdrapi import db
 import cdr2gk
-from .cdr_task_base import CDRTask
-from .task_property_bag import TaskPropertyBag
+from .base_job import Job
 
 
-class Sweeper(CDRTask):
+class Sweeper(Job):
     """Implements subclass to check for push jobs awaiting verification.
     """
 
     LOGNAME = "push-job-verifier"
     MAX_HOURS = cdr.getControlValue("Publishing", "push-verify-wait") or 12
 
-    def Perform(self):
+    def run(self):
         """Check any push jobs which are waiting to be verified.
         """
 
@@ -28,7 +27,6 @@ class Sweeper(CDRTask):
         rows = query.order("id").execute(self.cursor).fetchall()
         for job_id, completed in rows:
             self.verify_load(job_id, completed)
-        return TaskPropertyBag()
 
     def verify_load(self, job_id, completed):
         """Ask GateKeeper about the disposition of the job.
@@ -168,6 +166,7 @@ Please visit the following link for further details:
         message.send()
         self.logger.info("Problem report email send")
 
-        #if errors:
-        #    self.logger.error("failure sending mail: %s" % errors)
-        #    raise Exception("failure reporting problems(): %s" % errors)
+
+if __name__ == "__main__":
+    """Enable testing from the command line."""
+    Sweeper(None, "Push Job Verifier").run()

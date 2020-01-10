@@ -6,9 +6,8 @@ will be sent to the members of the "Test Publishing Notification"
 CDR group instead of the outside partners' email addresses.
 """
 
-import cgi
+from .base_job import Job
 import datetime
-import logging
 import os
 import time
 import lxml.etree as etree
@@ -16,18 +15,25 @@ import lxml.html as html
 import lxml.html.builder as B
 import requests
 import cdr
-from .cdr_task_base import CDRTask
-from core.exceptions import TaskException
-from .task_property_bag import TaskPropertyBag
 from cdrapi.users import Session
 from cdrapi import db
 from cdrapi.docs import Doc
 from html import escape as html_escape
 
-class Notify(CDRTask):
-    """
+
+class Notify(Job):
+    """Communication with PDQ data partners about fresh PDQ data.
+
     Task for notifying the PDQ data partners when the weekly refresh
     of PDQ data has been successfully completed.
+
+    Attributes:
+      conn - reference to database connection object
+      cursor - reference to database cursor for connection
+      logger - object for recording what we do
+      test - flag indicating whether this is a test run
+      ops - list of email addresses for notifying NCI staff
+      log_messages - flag indicating whether to log full email messages
     """
 
     LOGNAME = "data-partner-notification"
@@ -38,43 +44,79 @@ class Notify(CDRTask):
 
     test_recips = None
 
-    def __init__(self, parms, data):
-        """
-        Create a logger, connect to the DB, and check the options.
+    @property
+    def conn(self):
+        if not hasattr(self, "_conn"):
+            self._conn = db.connect()
+        return self._conn
 
-        mode
-            must be "test" or "live" (required)
-        log-level
-            optional logging level; defaults to "info"
-        superlog
-            if true, log full email messages (only effective if log-level
-            is set to "debug")
+    @property
+    def contacts(self):
+        """List of contacts for partners which have not already expired."""
 
-        Attributes:
-          conn - reference to database connection object
-          cursor - reference to database cursor for connection
-          logger - object for recording what we do
-          test - flag indicating whether this is a test run
-          ops - list of email addresses for notifying NCI staff
-          log_messages - flag indicating whether to log full email messages
-        """
+        if not hasattr(self, "_contacts"):
+            url = f"https://{cdr.APPC}/cgi-bin/cdr/get-pdq-contacts.py"
+            self.logger.info("fetching contacts from %r", url)
+            root = etree.fromstring(requests.get(url).content)
+            contacts = [Contact(self, node) for node in root.findall("contact")]
+            self.logger.info("%d contacts fetched", len(contacts))
+            self._contacts = contacts
+        return self._contacts
 
-        CDRTask.__init__(self, parms, data)
-        opts = dict(password=cdr.getpw("pdqcontent"))
-        self.session = Session.create_session("pdqcontent", **opts)
-        self.conn = db.connect()
-        self.cursor = self.conn.cursor()
-        self.log_messages = parms.get("superlog") and True or False
-        mode = parms.get("mode")
-        if mode not in self.MODES:
-            self.logger.error("invalid mode %r", mode)
-            raise Exception("invalid or missing mode")
-        self.test = parms.get("mode") != "live"
-        args = self.cursor, self.logger, parms.get("job"), self.test
-        self.job = self.Job(*args)
-        self.ops = self.get_group_email_addresses("PDQ Partner Notification")
+    @property
+    def cursor(self):
+        if not hasattr(self, "_cursor"):
+            self._cursor = self.conn.cursor()
+        return self._cursor
 
-    def Perform(self):
+    @property
+    def job(self):
+        if not hasattr(self, "_job"):
+            args = self.cursor, self.logger, self.opts.get("job"), self.test
+            self._job = self.ExportJob(*args)
+        return self._job
+
+    @property
+    def log_messages(self):
+        if not hasattr(self, "_log_messages"):
+            self._log_messages = True if self.opts.get("superlog") else False
+        return self._log_messages
+
+    @property
+    def ops(self):
+        """Operator accounts."""
+
+        if not hasattr(self, "_ops"):
+            group = "PDQ Partner Notification"
+            self._ops = self.get_group_email_addresses(group)
+        return self._ops
+
+    @property
+    def recip(self):
+        """Optional test recipient for all email messages."""
+
+        if not hasattr(self, "_recip"):
+            self._recip = self.opts.get("recip")
+        return self._recip
+
+    @property
+    def test(self):
+        if not hasattr(self, "_test"):
+            mode = self.opts.get("mode")
+            if mode not in self.MODES:
+                self.logger.error("invalid mode %r", mode)
+                raise Exception("invalid or missing mode")
+            self._test = mode != "live"
+        return self._test
+
+    @property
+    def session(self):
+        if not hasattr(self, "_session"):
+            opts = dict(password=cdr.getpw("pdqcontent"))
+            self._session = Session.create_session("pdqcontent", **opts)
+        return self._session
+
+    def run(self):
         """
         Send notifications to the active PDQ data partners.
 
@@ -91,21 +133,24 @@ class Notify(CDRTask):
         separate step handled by CBIIT at our request.
         """
 
-        for contact in Contact.get_contacts(self):
+        for contact in self.contacts:
             contact.process()
         self.report()
         self.logger.info("notification job complete")
-        return TaskPropertyBag()
 
     def report(self):
         """
         Send a summary report of processing to the ops team.
         """
 
+        if self.recip:
+            recips = [self.recip]
+        else:
+            recips = self.ops
         message = open(self.job.report_path).read() + "</ul>"
         subject = "Summary Report on Notification: %s" % self.job.subject
-        self.send(self.ops, subject, message)
-        self.logger.info("sent summary report to %r", self.ops)
+        self.send(recips, subject, message)
+        self.logger.info("sent summary report to %r", recips)
 
     def send(self, recips, subject, message):
         """
@@ -135,8 +180,12 @@ class Notify(CDRTask):
             if not cdr.isProdHost() or self.test:
                 extra = "In live prod mode, would have gone to %r" % recips
                 if Notify.test_recips is None:
-                    group = "Test Publishing Notification"
-                    Notify.test_recips = self.get_group_email_addresses(group)
+                    if self.recip:
+                        Notify.test_recips = [self.recip]
+                    else:
+                        group = "Test Publishing Notification"
+                        test_recips = self.get_group_email_addresses(group)
+                        Notify.test_recips = test_recips
                 recips = Notify.test_recips
                 self.logger.info("using recips: %r", recips)
                 message = "<h3>%s</h3>\n%s" % (html_escape(extra), message)
@@ -164,7 +213,7 @@ class Notify(CDRTask):
                 delay += self.DELAY
 
 
-    class Job:
+    class ExportJob:
         """
         Information about the export job for which we send notifications.
 
@@ -198,8 +247,7 @@ class Notify(CDRTask):
             row = query.execute(cursor).fetchone()
             logger.info("notifications for job %d started %s", row[0], row[1])
             self.id, self.started = row
-            values = cdr.BASEDIR, self.id
-            self.directory = "%s/Output/LicenseeDocs/Job%d" % values
+            self.directory = f"{cdr.BASEDIR}/Output/LicenseeDocs/Job{self.id}"
             self.year, self.week, self.day = self.started.isocalendar()
             self.message = self.load_notification_message(test)
             self.subject = self.create_subject(test)
@@ -283,7 +331,7 @@ class Notify(CDRTask):
                     row = B.TR(B.TD(name, style="text-align: right;"))
                     table.append(row)
                 row.append(B.TD(count, style="text-align: right;"))
-            return html.tostring(table, encoding="html")
+            return html.tostring(table, encoding="unicode")
 
 
 class Contact:
@@ -318,7 +366,6 @@ class Contact:
     EXPIRATION_THRESHOLD = str(TODAY - datetime.timedelta(100))
     WARNING_THRESHOLD = str(TODAY - datetime.timedelta(80))
     TYPE_STRINGS = { "T": "Test", "A": "Active", "S": "Special" }
-    HOST = cdr.APPC
     DELAY = 3
     TABLE = "data_partner_notification"
     COLS = "email_addr, notif_date"
@@ -380,7 +427,7 @@ class Contact:
         requests at the same time.
         """
 
-        if self.notified >= str(self.control.job.started):
+        if self.notified >= str(self.job.started):
             self.logger.info("%s notified %s", self.display, self.notified)
             return
         if self.expired:
@@ -406,8 +453,10 @@ class Contact:
         self.logger.info("notifying %s", self.display)
         self.report(summary)
         self.send(self.job.subject, self.job.message)
-        self.control.cursor.execute(self.INSERT, self.email.lower().strip())
-        self.control.conn.commit()
+        if not self.control.test:
+            email = self.email.lower().strip()
+            self.control.cursor.execute(self.INSERT, email)
+            self.control.conn.commit()
 
     def warn(self):
         """
@@ -486,9 +535,16 @@ class Contact:
                     node.insert(0, child)
             if child.text is None or not child.text.strip():
                 child.text = today
-        comment = "Marking account as inactive"
-        doc.check_out(force=True, comment=comment)
-        doc.save(version=True, reason=comment, comment=comment, unlock=True)
+        if not self.control.test:
+            comment = "Marking account as inactive"
+            doc.check_out(force=True, comment=comment)
+            opts = dict(
+                version=True,
+                reason=comment,
+                comment=comment,
+                unlock=True,
+            )
+            doc.save(**opts)
 
     def send(self, subject, message):
         """
@@ -517,18 +573,6 @@ class Contact:
         self.control.send(self.control.ops, subject, message)
         self.logger.debug("copied ops on %r", subject)
 
-    @classmethod
-    def get_contacts(cls, control):
-        """
-        Fetch the list of contacts for partners which have not already expired.
-        """
-
-        url = "https://%s/cgi-bin/cdr/get-pdq-contacts.py" % cls.HOST
-        control.logger.info("fetching contacts from %r", url)
-        root = etree.fromstring(requests.get(url).content)
-        contacts = [cls(control, node) for node in root.findall("contact")]
-        control.logger.info("%d contacts fetched", len(contacts))
-        return contacts
 
 if __name__ == "__main__":
     import argparse
@@ -538,6 +582,7 @@ if __name__ == "__main__":
     parser.add_argument("--level", default="debug")
     parser.add_argument("--job", type=int)
     parser.add_argument("--superlog", action="store_true")
+    parser.add_argument("--recip")
     opts = vars(parser.parse_args())
     opts["log-level"] = opts["level"]
-    Notify(opts, {}).Perform()
+    Notify(None, "Notification Test", **opts).run()

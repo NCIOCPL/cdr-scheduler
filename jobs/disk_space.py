@@ -21,10 +21,10 @@ import argparse
 import re
 import requests
 import cdr
-from .cdr_task_base import CDRTask
-from .task_property_bag import TaskPropertyBag
+from .base_job import Job
 
-class Monitor(CDRTask):
+
+class Monitor(Job):
     """Send out alerts when available disk space is too low.
     """
 
@@ -33,30 +33,41 @@ class Monitor(CDRTask):
     GB = 1024 * 1024 * 1024
     FROM = "NCIPDQoperator@mail.nih.gov"
 
-    def __init__(self, parms, data):
-        CDRTask.__init__(self, parms, data)
-        self.logger.info("started")
-        self.thresholds = {
-            "C": parms.get("cthreshold") or 10,
-            "D": parms.get("dthreshold") or 25
-        }
-        recips = parms.get("recips")
-        self.recips = []
-        if recips:
-            self.recips = [r.strip() for r in recips.split(",")]
-        if not self.recips:
-            group = "Developers Notification"
-            self.recips = CDRTask.get_group_email_addresses(group)
+    @property
+    def recips(self):
+        if not hasattr(self, "_recips"):
+            recips = self.opts.get("recips")
+            if recips:
+                if isinstance(recips, str):
+                    if "," in recips:
+                        recips = [r.strip() for r in recips.split(",")]
+                    else:
+                        recips = [recips.strip()]
+            else:
+                group = "Developers Notification"
+                recips = Job.get_group_email_addresses(group)
+            self._recips = recips
+        return self._recips
 
-    def Perform(self):
+    @property
+    def thresholds(self):
+        if not hasattr(self, "_thresholds"):
+            self._thresholds = {
+                "C": int(self.opts.get("cthreshold") or 10),
+                "D": int(self.opts.get("dthreshold") or 100),
+            }
+        return self._thresholds
+
+    def run(self):
+        self.logger.info("started")
         try:
             self.check()
         except Exception as e:
             self.logger.exception("failure")
             opts = dict(subject="DISK CHECK FAILURE", body=str(e))
             message = cdr.EmailMessage(self.FROM, self.recips, **opts)
-        finally:
-            return TaskPropertyBag()
+            message.send()
+
     def check(self):
         problems = []
         for tier in self.TIERS:
@@ -64,15 +75,15 @@ class Monitor(CDRTask):
                 server = self.Server(tier)
             except Exception as e:
                 self.logger.exception("failure checking %s", tier)
-                problem = "failure checking %s: %s" % (tier, e)
+                problem = f"failure checking {tier}: {e}"
                 problems.append(problem)
                 continue
             for drive in sorted(server.free):
                 free = server.free[drive]
                 if free.bytes < self.thresholds[drive] * self.GB:
-                    amount = "%d bytes %s" % (free.bytes, free.human)
+                    amount = f"{free.bytes} bytes {free.human}"
                     args = drive, server.name, amount
-                    problem = "%s: drive on %s server down to %s" % args
+                    problem = "{}: drive on {} server down to {}".format(*args)
                     self.logger.warning(problem)
                     problems.append(problem)
         if problems:
@@ -85,14 +96,14 @@ class Monitor(CDRTask):
             self.logger.info("disk space OK")
 
     class Server:
-        BASE = "https://cdr%s.cancer.gov/cgi-bin/cdr/df.py"
+        BASE = "https://cdr{}.cancer.gov/cgi-bin/cdr/df.py"
         def __init__(self, tier):
             self.name = tier
             self.free = {}
             suffix = ""
             if self.name != "PROD":
                 suffix = "-%s" % tier.lower()
-            url = self.BASE % suffix
+            url = self.BASE.format(suffix)
             drive = None
             for line in requests.get(url).text.splitlines():
                 if "DRIVE" in line:
@@ -114,6 +125,8 @@ class Monitor(CDRTask):
         parser.add_argument("--level", default="info")
         opts = vars(parser.parse_args())
         opts["log-level"] = opts.get("level")
-        Monitor(opts, {}).Perform()
+        Monitor(None, "Disk Space Test", **opts).run()
+
+
 if __name__ == "__main__":
     Monitor.test()

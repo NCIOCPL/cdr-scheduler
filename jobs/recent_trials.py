@@ -17,29 +17,17 @@ import datetime
 import lxml.etree as etree
 import requests
 import zipfile
-from .cdr_task_base import CDRTask
-from core.exceptions import TaskException
-from .task_property_bag import TaskPropertyBag
+from .base_job import Job
 
 
-class RefreshTask(CDRTask):
+class RefreshTask(Job):
     """
     Implements subclass for managing the nightly refresh of trial info.
     """
 
-    def __init__(self, parms, data):
-        """
-        Initialize the base class then instantiate our Control object,
-        which does all the real work. The data argument is ignored.
-        """
-
-        CDRTask.__init__(self, parms, data)
-        self.control = Control(parms)
-
-    def Perform(self):
+    def run(self):
         "Hand off the real work to the Control object."
-        self.control.run()
-        return TaskPropertyBag()
+        Control(self.opts).run()
 
 
 class Control:
@@ -64,14 +52,14 @@ class Control:
         database query objects.
         """
 
+        self.logger = cdr.Logging.get_logger(self.NAME)
+        self.conn = db.connect(as_dict=True)
+        self.cursor = self.conn.cursor()
         cutoff = options.get("cutoff")
         if cutoff:
             self.cutoff = self.parse_date(cutoff)
         else:
-            self.cutoff = self.get_default_cutoff()
-        self.logger = cdr.Logging.get_logger(self.NAME)
-        self.conn = db.connect(as_dict=True)
-        self.cursor = self.conn.cursor()
+            self.cutoff = self.get_default_cutoff(self.cursor)
 
     def run(self):
         """
@@ -85,7 +73,7 @@ class Control:
                 self.record()
         except Exception as e:
             self.logger.exception("failed")
-            raise TaskException("failed: %s" % e)
+            raise
 
     def fetch(self):
         """
@@ -173,7 +161,7 @@ INSERT INTO ctgov_trial_sponsor (nct_id, position, sponsor)
         self.logger.info("processed %d trials, %d new", len(names), loaded)
 
     @staticmethod
-    def get_default_cutoff():
+    def get_default_cutoff(cursor=None):
         """
         Default cutoff is eight days earlier than the latest date we
         have recorded for when a trial first landed on NLM's
@@ -183,7 +171,7 @@ INSERT INTO ctgov_trial_sponsor (nct_id, position, sponsor)
         """
 
         query = db.Query("ctgov_trial", "MAX(first_received) AS mfr")
-        rows = query.execute().fetchall()
+        rows = query.execute(cursor).fetchall()
         for row in rows:
             return (row.mfr - datetime.timedelta(21)).date()
         return datetime.date(2015, 1, 1)
@@ -264,8 +252,5 @@ def main():
     Control(opts).run()
 
 if __name__ == "__main__":
-    """
-    Run the job if loaded as a script (not a module).
-    """
-
+    """Run the job if loaded as a script (not a module)."""
     main()

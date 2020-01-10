@@ -1,187 +1,207 @@
-"""Run the scheduler process."""
-
-import logging
-import os
-import sys
-import cdr
+from cdr import Logging
 from cdrapi import db
-from cdrapi.settings import Tier
+from datetime import datetime
+from importlib import import_module
+from json import loads
+from apscheduler.schedulers.background import BackgroundScheduler
+from time import sleep
 
-# Things we need to do before loading the other modules.
-class Config:
-    TIER = Tier()
-    SENDER = "cdr@cancer.gov"
 
-    @classmethod
-    def init(cls):
-        logging.basicConfig(
-            filename="%s/scheduler.log" % cdr.DEFAULT_LOGDIR,
-            format="[%(process)s/%(thread)s] " + cdr.Logging.FORMAT,
-            level=logging.DEBUG
-        )
-        try:
-            query = db.Query("usr e", "e.email")
-            query.join("grp_usr u", "u.usr = e.id")
-            query.join("grp g", "g.id = u.grp")
-            query.where("g.name = 'Developers Notification'")
-            rows = query.execute().fetchall()
-            cls.RECIPS = [row[0] for row in rows if row[0]]
-        except:
-            logging.exception("database unavailable - exiting")
-            sys.exit(1)
-        if cls.RECIPS:
+class Control:
+    SLEEP = 10
+    DELETE = "DELETE FROM scheduled_job WHERE id = ?"
+    SELECT = "SELECT * FROM scheduled_job"
+
+    @property
+    def conn(self):
+        if not hasattr(self, "_conn"):
+            self._conn = db.connect()
+        return self._conn
+    @property
+    def jobs(self):
+        if not hasattr(self, "_jobs"):
+            self._jobs = {}
+        return self._jobs
+    @property
+    def logger(self):
+        if not hasattr(self, "_logger"):
+            self._logger = Logging.get_logger("cdr-scheduler")
+        return self._logger
+
+    @property
+    def scheduler(self):
+        if not hasattr(self, "_scheduler"):
+            self._scheduler = BackgroundScheduler(timezone="US/Eastern")
+        return self._scheduler
+    @property
+    def stopped(self):
+        if not hasattr(self, "_stopped"):
+            self._stopped = False
+        return self._stopped
+
+    @stopped.setter
+    def stopped(self, value):
+        self._stopped = value
+
+    def run(self):
+        self.logger.info("*" * 50)
+        self.logger.info("CDR scheduler started")
+        self.__load_jobs()
+        self.scheduler.start()
+        while not self.stopped:
             try:
-                subject = f"[{cls.TIER.name}] CDR Scheduler service restarted"
-                opts = dict(subject=subject)
-                message = cdr.EmailMessage(cls.SENDER, cls.RECIPS, **opts)
-                message.send()
-            except:
-                pass
-Config.init()
+                sleep(self.SLEEP)
+                self.__refresh_jobs()
+            except (KeyboardInterrupt, SystemExit):
+                self.stop()
+        self.logger.info("CDR scheduler stopped")
+        self.scheduler.shutdown()
 
-# Now bring in the other modules we need.
-import tornado
-from sqlalchemy import event
-from sqlalchemy.pool import Pool
-from ndscheduler import settings
-from ndscheduler.server.handlers import audit_logs
-from ndscheduler.server.handlers import executions
-from ndscheduler.server.handlers import index
-from ndscheduler.server.handlers import jobs
-from ndscheduler.server import server
+    def stop(self):
+        self.stopped = True
 
-class CDRScheduler(server.SchedulerServer):
-
-    STATIC_DIR = r"D:\Inetpub\wwwroot\cgi-bin\scheduler\static"
-
-    def __init__(self, scheduler_instance):
-        """Launch a web server to handle administering jobs.
-
-        Unfortunately, the ndscheduler constructor does not
-        expose the ability to control whether the tornado
-        module can restart the scheduler when files change,
-        so we have to override the constructor completely.
-        That means that we'll lose any bug fixes or enhancements
-        introduced later by ndscheduler in the constructor,
-        and could even mean that they could do something which
-        could break our constructor. We'll try to give them a
-        patch which solves the problem by exposing the ability
-        to pass in custom tornado settings.
-        """
-
-        self.scheduler_manager = scheduler_instance
-
-        self.tornado_settings = dict(
-            debug=settings.DEBUG,
-            static_path=self.STATIC_DIR,
-            template_path=self.STATIC_DIR,
-            scheduler_manager=self.scheduler_manager,
-            autoreload=False
-        )
-
-        # Setup server
-        URLS = [
-            # Index page
-            (r"/", index.Handler),
-
-            # APIs
-            (r"/api/%s/jobs" % self.VERSION, jobs.Handler),
-            (r"/api/%s/jobs/(.*)" % self.VERSION, jobs.Handler),
-            (r"/api/%s/executions" % self.VERSION, executions.Handler),
-            (r"/api/%s/executions/(.*)" % self.VERSION, executions.Handler),
-            (r"/api/%s/logs" % self.VERSION, audit_logs.Handler),
-        ]
-        self.application = tornado.web.Application(URLS,
-                                                   **self.tornado_settings)
-
-    def start_scheduler(self):
-        """
-        Clean up outstanding failed jobs and start the scheduler.
-        """
-
-        settings_module = os.environ["NDSCHEDULER_SETTINGS_MODULE"]
-        logging.info("sys.path: %s", sys.path)
-        logging.info("directory: %s", os.getcwd())
-        logging.info("PYTHONPATH: %s", os.environ["PYTHONPATH"])
-        logging.info("SETTINGS MODULE: %s", settings_module)
-        logging.info("STATIC DIR: %s", self.STATIC_DIR)
-        self.fix_zombies()
-        server.SchedulerServer.start_scheduler(self)
-
-    def post_scheduler_stop(self):
-        """
-        Add our own logging to find out when the scheduler is stopped.
-        """
-
-        logging.info("CDR scheduler stopped")
-
-    @staticmethod
-    def fix_zombies():
-        """
-        Mark zombie execution runs as FAILED.
-
-        From JIRA ticket OCECDR-4064:
-        When the scheduler's python process is terminated, jobs which
-        were running at the time remain marked as "Running."
-        Change the status to "Failed."
-
-        There is no API call in ndscheduler for fetching the execution
-        IDs for executions in a given state. Instead the get_executions()
-        method of the datastore object returns all executions whose
-        scheduled_time value falls within a specified range. Since
-        we don't have any way of knowing exactly which date range to
-        use, and I'd rather not have it contstruct an Execution object
-        for every run of every task of every job for the entire life
-        of the system, we use the datastore's engine to run a query
-        we build ourselves using sqlalchemy. We do use the datastore
-        object to set the new FAILED state, though.
-        """
-
-        from ndscheduler import constants
-        from ndscheduler.core import scheduler_manager
-        from ndscheduler.core.datastore import tables
-        from sqlalchemy import select
-        failed = constants.EXECUTION_STATUS_FAILED
-        running = constants.EXECUTION_STATUS_RUNNING
-        desc = "marking zombie run as failed"
-        eid_col = tables.EXECUTIONS.c.eid
-        state_col = tables.EXECUTIONS.c.state
-        scheduler = scheduler_manager.SchedulerManager.get_instance()
-        datastore = scheduler.get_datastore()
-        query = select([eid_col]).where(state_col == running)
-        eids = [row.eid for row in datastore.engine.execute(query)]
-        logging.info("found %d zombie executions", len(eids))
-        for eid in eids:
-            print(eid, (repr(eid)))
-            logging.info("marking zombie %s as FAILED", eid)
-            datastore.update_execution(eid, state=failed, description=desc)
-
-    @staticmethod
-    @event.listens_for(Pool, "checkout")
-    def db_ping(conn, record, proxy):
-        """
-        Hook into the sqlalchemy layer to detect lost db connections.
-
-        We need to exit when that happens so the service manager can
-        keep trying to restart us until the database access is restored.
-        """
-
+    def delete_job(self, job_id):
         try:
-            #logging.info("db_ping")
-            cursor = conn.cursor()
-            cursor.execute("SELECT 1")
-            cursor.close()
-        except Exception as e:
-            logging.exception("database failure - exiting")
-            if Config.RECIPS:
-                try:
-                    subject = f"[{Config.TIER.name}] CDR Scheduler DB failure"
-                    opts = dict(subject=subject, body=str(e))
-                    args = Config.SENDER, Config.RECIPS
-                    message = cdr.EmailMessage(*args, **opts)
-                except:
-                    pass
-            sys.exit(1)
+            with self.conn.cursor() as cursor:
+                cursor.execute(self.DELETE, job_id)
+                self.conn.commit()
+        except Exception:
+            self.logger.exception("Failure deleting job %s", job_id)
 
-if __name__ == "__main__":
-    CDRScheduler.run()
+    def __load_jobs(self):
+        start = datetime.now()
+        with self.conn.cursor() as cursor:
+            for row in cursor.execute(self.SELECT).fetchall():
+                try:
+                    job = self.Job(self, row)
+                    job.register()
+                except Exception as e:
+                    self.logger.exception("malformed job %s", tuple(row))
+        elapsed = datetime.now() - start
+        self.logger.info("registered %d jobs in %s", len(self.jobs), elapsed)
+
+    def __refresh_jobs(self):
+        start = datetime.now()
+        found = set()
+        with self.conn.cursor() as cursor:
+            for row in cursor.execute(self.SELECT).fetchall():
+                try:
+                    job = self.Job(self, row)
+                    found.add(job.id)
+                    job.register()
+                except Exception as e:
+                    self.logger.exception("malformed job %s", tuple(row))
+        for id in set(self.jobs) - found:
+            job = self.jobs[id]
+            self.logger.info("Job %r dropped", job.name)
+            self.scheduler.remove_job(id)
+            del self.jobs[id]
+        elapsed = datetime.now() - start
+        self.logger.debug("jobs refreshed in %s", elapsed)
+
+
+    class Job:
+        def __init__(self, control, row):
+            self.__control = control
+            self.__row = row
+
+        def __eq__(self, other):
+            return tuple(self.__row) == tuple(other.__row)
+
+        def __str__(self):
+            return str(tuple(self.__row))
+
+        @property
+        def enabled(self):
+            return self.__row.enabled
+
+        @property
+        def id(self):
+            return self.__row.id
+
+        @property
+        def job_class(self):
+            return self.__row.job_class
+
+        @property
+        def logger(self):
+            return self.__control.logger
+
+        @property
+        def name(self):
+            return self.__row.name
+
+        @property
+        def opts(self):
+            if not hasattr(self, "_opts"):
+                self._opts = loads(self.__row.opts)
+            return self._opts
+
+        @property
+        def schedule(self):
+            if not hasattr(self, "_schedule"):
+                self._schedule = self.__row.schedule
+                if self._schedule:
+                    self._schedule = loads(self._schedule)
+            return self._schedule
+
+        def register(self):
+            old = self.__control.jobs.get(self.id)
+            scheduler = self.__control.scheduler
+            if old:
+                if self == old:
+                    return
+                if not self.schedule:
+                    self.logger.info("Removed %r schedule", old.name)
+                    del self.__control.jobs[self.id]
+                    scheduler.remove_job(self.id)
+                    if self.enabled:
+                        self.logger.info("Manual run of %r", self.name)
+                        scheduler.add_job(self.run, name=self.name)
+                        self.__control.delete_job(self.id)
+                else:
+                    self.logger.info("Modified %r registration", old.name)
+                    opts = dict(func=self.run, name=self.name)
+                    self.__control.jobs[self.id] = self
+                    scheduler.modify_job(self.id, **opts)
+                    if old.schedule != self.schedule:
+                        opts = dict(self.schedule)
+                        opts["trigger"] = "cron"
+                        scheduler.reschedule_job(self.id, **opts)
+                    if not old.enabled and self.enabled:
+                        scheduler.resume_job(self.id)
+                    elif not self.enabled and old.enabled:
+                        scheduler.pause_job(self.id)
+            elif self.schedule:
+                self.logger.info("Registered %r", self.name)
+                opts = dict(self.schedule)
+                opts["id"] = self.id
+                opts["name"] = self.name
+                if not self.enabled:
+                    opts["next_run_time"] = None
+                scheduler.add_job(self.run, "cron", **opts)
+                self.__control.jobs[self.id] = self
+            elif self.enabled:
+                self.logger.info("Unscheduled run of %r", self.name)
+                scheduler.add_job(self.run, name=self.name)
+                self.__control.delete_job(self.id)
+
+        def run(self):
+            try:
+                start = datetime.now()
+                module_name, class_name = self.job_class.split(".")
+                module = import_module(f"jobs.{module_name}")
+                args = self.__control, self.name
+                getattr(module, class_name)(*args, **self.opts).run()
+                args = start, datetime.now() - start, self.name
+                self.logger.info("Job started %s, elapsed %s (%s)", *args)
+            except Exception:
+                self.logger.exception("%s started %s", self.name, start)
+
+
+control = Control()
+try:
+    control.run()
+except Exception as e:
+    control.logger.exception("Failure")
+    print(e)
