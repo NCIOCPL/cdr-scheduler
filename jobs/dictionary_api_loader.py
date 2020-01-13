@@ -121,6 +121,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     choices = "drugs", "glossary"
     parser.add_argument("--dictionary", "-d", choices=choices, required=True)
+    parser.add_argument("--ids", "-i", type=int, nargs="*")
     parser.add_argument("--tier", "-t")
     parser.add_argument("--loglevel", "-l", default="INFO")
     parser.add_argument("--verbose", "-v", action="store_true")
