@@ -15,7 +15,9 @@ script registers the CDR Scheduler as a Windows service.
 
 The [`cdr_scheduler.py`](cdr_scheduler.py) script checks every few
 seconds to see if there are any jobs due to be run and if so, it
-launches them in separate threads.
+launches them in separate threads. For an overview of how the scheduler
+works, start by reading the documentation comments at the top of this
+scipt.
 
 ## Scheduled Jobs
 
