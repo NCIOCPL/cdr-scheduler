@@ -1,3 +1,6 @@
+"""Base class whose derived classes implement job functionality.
+"""
+
 import logging
 from threading import Lock
 from cdr import DEFAULT_LOGDIR
