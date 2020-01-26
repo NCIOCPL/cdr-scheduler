@@ -57,9 +57,9 @@ class Control:
         """Top-level entry point.
 
         Load the jobs from the database table and register them with
-        the scheduler. The check in a loop for any changes which
+        the scheduler. Then check in a loop for any changes which
         need to be registered. Exit the loop and shut down the
-        scheduler whent the `stopped` flag is set (by the _Restart
+        scheduler when the `stopped` flag is set (by the _Restart
         Scheduler_ job).
         """
 
@@ -120,7 +120,7 @@ class Control:
 
     @property
     def scheduler(self):
-        """Object for scheduler which runs jobs in separate threads."""
+        """Let the APScheduler package handle the scheduled jobs."""
 
         if not hasattr(self, "_scheduler"):
             self._scheduler = BackgroundScheduler(timezone="US/Eastern")
@@ -128,7 +128,7 @@ class Control:
 
     @property
     def stopped(self):
-        """If True we're shutting down."""
+        """If `True` we're shutting down."""
 
         if not hasattr(self, "_stopped"):
             self._stopped = False
@@ -195,11 +195,13 @@ class Control:
     class Job:
         """Settings from the database table for this job.
 
-        Objects of this class control the job's scheduling/execution.
-        The job will also have a class derived from the base class
-        `jobs.base_job.Job` which is used for implementing the
-        functionality for that job, with its own `run()` method
-        which is invoked when it is time for the job to execute.
+        Objects of this class communicate with the APScheduler package
+        which is responsible for determining when the job should be
+        run. The job will also have a class derived from the base
+        class `jobs.base_job.Job` which is used for implementing the
+        functionality for that job, with its own `run()` method which
+        is invoked when it is time for the job to execute.
+
         """
 
         def __init__(self, control, row):
@@ -252,7 +254,7 @@ class Control:
 
         @property
         def opts(self):
-            """Parameters passed to the job."""
+            """Parameter options passed to the job."""
 
             if not hasattr(self, "_opts"):
                 self._opts = loads(self.__row.opts)
@@ -285,7 +287,7 @@ class Control:
             old = self.__control.jobs.get(self.id)
             if old:
 
-                # If nothing has changed, we're done here.
+                # If nothing has changed, we're done here (most common case).
                 if self == old:
                     return
 
@@ -299,6 +301,8 @@ class Control:
                     # Not a likely sequence, but if the user removes
                     # the job's schedule but leaves the `enabled`
                     # flag set, do a one-off execution of the job.
+                    # Then drop the row from the database table so
+                    # the job isn't run repeatedly.
                     if self.enabled:
                         self.logger.info("Manual run of %r", self.name)
                         scheduler.add_job(self.run, name=self.name)
@@ -306,7 +310,7 @@ class Control:
 
                 else:
 
-                    # An existing job has been modified.
+                    # An existing scheduled job has been modified.
                     self.logger.info("Modified %r registration", old.name)
 
                     # Swap the new `Control.Job` object into the dictionary.
@@ -364,7 +368,7 @@ class Control:
 
             try:
                 start = datetime.now()
-                module_name, class_name = self.job_class.split(".")
+                module_name, class_name = self.job_class.split(".", 1)
                 module = import_module(f"jobs.{module_name}")
                 args = self.__control, self.name
                 getattr(module, class_name)(*args, **self.opts).run()
