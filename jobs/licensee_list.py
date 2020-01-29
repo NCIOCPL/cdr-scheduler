@@ -3,34 +3,23 @@ Program to create a list of active licensees (Production/Test)
 This job should run as a scheduled job once a month.
 """
 
-from .cdr_task_base import CDRTask
-from core.exceptions import TaskException
-from .task_property_bag import TaskPropertyBag
+from .base_job import Job
 import datetime
 import requests
 import cdr
 from cdrapi import db
 
-class ReportTask(CDRTask):
+class ReportTask(Job):
     """
     Implements subclass for managing the monthly licensee report.
     """
 
     LOGNAME = "licensees"
 
-    def __init__(self, parms, data):
-        """
-        Initialize the base class then instantiate our Control object,
-        which does all the real work. The data argument is ignored.
-        """
-
-        CDRTask.__init__(self, parms, data)
-        self.control = Control(parms, self.logger)
-
-    def Perform(self):
+    def run(self):
         "Hand off the real work to the Control object."
-        self.control.run()
-        return TaskPropertyBag()
+        control = Control(self.opts, self.logger)
+        control.run()
 
 
 class Control:
@@ -86,6 +75,10 @@ class Control:
             must be "test" or "live" (required); test mode restricts
             recipient list for report
 
+        recip
+            optional email address, used when testing so we don't
+            spam anyone else
+
         skip-email
             optional Boolean, defaults to False; if True, don't email
             the report to anyone
@@ -96,11 +89,12 @@ class Control:
 
         self.options = options
         self.mode = options["mode"]
+        self.recip = options.get("recip")
         self.skip_email = options.get("skip-email") or False
         self.test = self.mode == "test"
         self.logger = logger
         if self.mode not in self.MODES:
-            raise TaskException("invalid mode %s" % repr(self.mode))
+            raise Exception("invalid mode %s" % repr(self.mode))
         self.cursor = db.connect(user="CdrGuest").cursor()
 
     def run(self):
@@ -161,11 +155,14 @@ class Control:
         report    Serialized HTML document for the report.
         """
 
-        if self.test:
-            group = "Test Publishing Notification"
+        if self.recip:
+            recips = [self.recip]
         else:
-            group = "Licensee Report Notification"
-        recips = CDRTask.get_group_email_addresses(group)
+            if self.test:
+                group = "Test Publishing Notification"
+            else:
+                group = "Licensee Report Notification"
+            recips = Job.get_group_email_addresses(group)
         title = "PDQ Distribution Partner List"
         subject = "[%s] %s" % (cdr.Tier().name, title)
         opts = dict(subject=subject, body=report, subtype="html")
@@ -362,6 +359,7 @@ class Partners:
             Control.th("Last Access")
         )
 
+
 class Partner:
     """
     Object holding the information needed for a single row in the report.
@@ -415,6 +413,7 @@ class Partner:
             Control.td(self.last_access, white_space="nowrap")
         )
 
+
 if __name__ == "__main__":
     """
     Make it possible to run this task from the command line.
@@ -433,6 +432,7 @@ if __name__ == "__main__":
                         help="just write the report to the file system")
     parser.add_argument("--log-level", choices=("info", "debug", "error"),
                         default="info", help="verbosity of logging")
+    parser.add_argument("--recip", help="optional email address for testing")
     args = parser.parse_args()
     opts = dict([(k.replace("_", "-"), v) for k, v in args._get_kwargs()])
     logging.basicConfig(format=cdr.Logging.FORMAT, level=args.log_level.upper())

@@ -1,34 +1,35 @@
-"""
-Logic for Gov Delivery reports
+"""Run the GovDelivery reports.
 """
 
 import cdr
 from cdrapi import db
 import datetime
+import json
+from .base_job import Job
 
-from .cdr_task_base import CDRTask
-from .task_property_bag import TaskPropertyBag
 
-class ReportTask(CDRTask):
+class ReportTask(Job):
     """
     Implements subclass for managing scheduled GovDelivery reports.
     """
 
     LOGNAME = "gov_delivery_reports"
 
-    def __init__(self, parms, data):
-        """
-        Initialize the base class then instantiate our Control object,
-        which does all the real work. The data argument is ignored.
-        """
-
-        CDRTask.__init__(self, parms, data)
-        self.control = Control(parms, self.logger)
-
-    def Perform(self):
+    def run(self):
         "Hand off the real work to the Control object."
-        self.control.run()
-        return TaskPropertyBag()
+        reports = self.opts.get("reports")
+        if reports:
+            try:
+                reports = json.loads(reports)
+            except Exception:
+                if "," in reports:
+                    reports = [r.strip() for r in reports.split(",")]
+                else:
+                    reports = [r.strip() for r in reports.split()]
+            self.opts["reports"] = reports
+        control = Control(self.opts, self.logger)
+        control.run()
+
 
 class Control:
     """
@@ -109,6 +110,9 @@ class Control:
 
         end
             overrides the default end of the date range (today)
+
+        recip
+            optional email address for testing so we don't spam others
         """
 
         self.TODAY = datetime.date.today()
@@ -122,6 +126,7 @@ class Control:
         self.start = options.get("start") or str(self.DEFAULT_START)
         self.end = options.get("end") or str(self.DEFAULT_END)
         self.test = self.mode == "test"
+        self.recip = options.get("recip")
         self.cursor = db.connect(user="CdrGuest").cursor()
         if self.skip_email:
             self.logger.info("skipping email of reports")
@@ -234,15 +239,18 @@ class Control:
         report    Serialized HTML document for the report.
         """
 
-        if self.test:
-            group = "Test Publishing Notification"
+        if self.recip:
+            recips = [self.recip]
         else:
-            group = {
-                "spanish": "GovDelivery ES Docs Notification",
-                "english": "GovDelivery EN Docs Notification",
-                "trials": "GovDelivery Trials Notification"
-            }.get(self.key)
-        recips = CDRTask.get_group_email_addresses(group)
+            if self.test:
+                group = "Test Publishing Notification"
+            else:
+                group = {
+                    "spanish": "GovDelivery ES Docs Notification",
+                    "english": "GovDelivery EN Docs Notification",
+                    "trials": "GovDelivery Trials Notification"
+                }.get(self.key)
+                recips = Job.get_group_email_addresses(group)
         if recips:
             subject = "[%s] %s" % (self.TIER.name, self.title)
             opts = dict(subject=subject, body=report, subtype="html")
@@ -468,6 +476,7 @@ class TrialSet:
             ul
         )
 
+
 class Summary:
     """
     Represents a single document for the report.
@@ -649,6 +658,7 @@ class SummarySet:
             table.append(Control.B.TR(Control.td("None")))
         return table
 
+
 def main():
     """
     Make it possible to run this task from the command line.
@@ -672,6 +682,7 @@ def main():
                         choices=Control.REPORTS, default=Control.REPORTS)
     parser.add_argument("--start", help="optional start of date range")
     parser.add_argument("--end", help="optional end of date range")
+    parser.add_argument("--recip", help="optional email address for teseting")
     args = parser.parse_args()
     opts = dict([(k.replace("_", "-"), v) for k, v in args._get_kwargs()])
     logging.basicConfig(format=cdr.Logging.FORMAT, level=args.log_level.upper())

@@ -14,14 +14,14 @@ from dateutil.relativedelta import relativedelta
 from lxml import etree
 import openpyxl
 import requests
-from core.exceptions import TaskException
-from .task_property_bag import TaskPropertyBag
 
 # Project modules
 import cdr
-from .cdr_task_base import CDRTask
+from cdrapi.settings import Tier
+from .base_job import Job
 
-class Report(CDRTask):
+
+class Report(Job):
     """
     Task for generating a spreadsheet showing which PDQ partners
     have connected to the SFTP server to retrieve data.
@@ -43,71 +43,54 @@ class Report(CDRTask):
     DELAY = 5
     WIDTHS = 15, 50, 40, 10, 10, 10
     LABELS = "Login", "Partner", "Path", "Session", "Date", "Time"
-    NON_PARTNERS = set(cdr.getControlValue("PDQ",
-                                           "non-partners", "").split(","))
+    NON_PARTNERS = cdr.getControlValue("PDQ", "non-partners", "")
+    NON_PARTNERS = set(NON_PARTNERS.split(","))
 
-    def __init__(self, parms, data):
-        """
-        Create a logger and set up the options.
-
-        level
-            optional logging level; defaults to "info"
-        resend
-            if True just send an already generated report
-        noemail
-            if True do everything except email the report (for testing)
-        month
-            override YYYYMM (default is previous month)
-        recips
-            comma-separated email addresses (default is content
-            dissemination mailbox)
-        """
-
-        CDRTask.__init__(self, parms, data)
-        self.logger.info("Report started")
-        self.set_opts(parms)
-
-    def set_opts(self, parms):
-        """
-        Extract the runtime options for this task.
-        """
-
-        for name in parms:
-            self.logger.info("Option %s=%r", name, parms[name])
-        self.resend = parms.get("resend") and True or False
-        self.noemail = parms.get("noemail") and True or False
-        self.month = self.Month(parms.get("month"))
-        self.recips = self.get_recips(parms.get("recips"))
-        self.report_path = self.month.report_path()
-        self.log_path = self.month.log_path()
-
-    def get_recips(self, recips):
-        """
-        Figure out who we should send the report to.
-        """
-
-        if recips:
-            return [recip.strip() for recip in recips.split(",")]
-        return ["NCIContentDissemination@nih.gov"]
-
-    def Perform(self):
+    def run(self):
         """
         Generate and/or send the report.
         """
 
+        self.logger.info("Report started")
+        for name in self.opts:
+            self.logger.info("Option %s=%r", name, self.opts[name])
         if not self.resend:
-            self.orgs = self.get_orgs()
-            requests = self.get_requests()
-            self.make_report(requests)
+            self.make_report(self.requests)
         if not self.noemail:
             self.send_report()
-        return TaskPropertyBag()
 
-    def get_orgs(self):
+    @property
+    def log_path(self):
+        """Location of the log to be parsed."""
+
+        if not hasattr(self, "_log_path"):
+            self._log_path = self.month.log_path()
+        return self._log_path
+
+    @property
+    def month(self):
+        """Period for which activity is to be reported."""
+
+        if not hasattr(self, "_month"):
+            self._month = self.Month(self.opts.get("month"))
+        return self._month
+
+    @property
+    def noemail(self):
+        """If True we skip sending the report."""
+
+        if not hasattr(self, "_noemail"):
+            self._noemail = True if self.opts.get("noemail") else False
+        return self._noemail
+
+    @property
+    def orgs(self):
         """
         Fetch the information about the organizations with which we partner.
         """
 
+        if hasattr(self, "_orgs"):
+            return self._orgs
         url = "https://cdr.cancer.gov/cgi-bin/cdr/get-pdq-partners.py?p=CDR"
         self.logger.info("fetching partners from %r", url)
         class Org:
@@ -118,16 +101,38 @@ class Report(CDRTask):
                 self.uid = cdr.get_text(node.find("ftp_userid"))
                 self.terminated = cdr.get_text(node.find("terminated"))
         root = etree.fromstring(requests.get(url).content)
-        orgs = {}
+        self._orgs = {}
         for node in root.findall("org_id"):
             org = Org(node)
             if org.uid is not None:
-                orgs[org.uid] = org
-        return orgs
+                self._orgs[org.uid] = org
+        return self._orgs
 
-    def get_requests(self):
+    @property
+    def recips(self):
         """
-        Parse the log file, extracting the partner requests.
+        Figure out who we should send the report to.
+        """
+
+        if not hasattr(self, "_recips"):
+            recips = self.opts.get("recips")
+            if recips:
+                self._recips = [r.strip() for r in recips.split(",")]
+            else:
+                self._recips = ["NCIContentDissemination@nih.gov"]
+        return self._recips
+
+    @property
+    def report_path(self):
+        """Location of the log to be parsed."""
+
+        if not hasattr(self, "_report_path"):
+            self._report_path = self.month.report_path()
+        return self._report_path
+
+    @property
+    def requests(self):
+        """Partner requests extracted from the log file.
 
         Make sure we have the latest log files (using rsync),
         and then walk through each line in the log file for this
@@ -145,6 +150,9 @@ class Report(CDRTask):
 
         ... which is why we use the expression [5:-2] to extract them.
         """
+
+        if hasattr(self, "_requests"):
+            return self._requests
 
         class Request:
             def __init__(self, line, sids, orgs):
@@ -177,11 +185,11 @@ class Report(CDRTask):
                     self.org = orgs[self.user].name or ""
                 else:
                     self.org = ""
-        requests = {}
+        self._requests = {}
         sids = {}
         count = 0
         self.logger.info("parsing %r", self.log_path)
-        self.sync_logs()
+        self.__sync_logs()
         with gzip.open(self.log_path) as fp:
             for line in fp.readlines():
                 line = str(line, "utf-8")
@@ -189,9 +197,9 @@ class Report(CDRTask):
                     request = Request(line, sids, self.orgs)
                     if request.user in self.NON_PARTNERS:
                         continue
-                    if request.user not in requests:
-                        requests[request.user] = []
-                    requests[request.user].append(request)
+                    if request.user not in self._requests:
+                        self._requests[request.user] = []
+                    self._requests[request.user].append(request)
                     count += 1
                 elif "session opened for local user" in line:
                     tokens = line.split()
@@ -200,11 +208,27 @@ class Report(CDRTask):
                     sid = int(tokens[4][5:-2])
                     user = tokens[10]
                     sids[sid] = user
-        args = count, len(requests)
+        args = count, len(self._requests)
         self.logger.info("fetched %d requests from %d partners", *args)
-        return requests
+        return self._requests
 
-    def sync_logs(self):
+    @property
+    def resend(self):
+        """If True we send a previously saved report."""
+
+        if not hasattr(self, "_resend"):
+            self._resend = True if self.opts.get("resend") else False
+        return self._resend
+
+    @property
+    def tier(self):
+        """Run time settings."""
+
+        if not hasattr(self, "_tier"):
+            self._tier = Tier()
+        return self._tier
+
+    def __sync_logs(self):
         """
         Top up our local copies of the pdq logs from the sftp server.
         We're ignoring some expected errors, having to do with cygwin's
@@ -213,8 +237,9 @@ class Report(CDRTask):
         log file successfully, we'll find out when we try to read it.
         """
 
-        ssh = ("ssh -i d:/etc/cdroperator_rsa -o LogLevel=error "
-               "-o StrictHostKeyChecking=no")
+        etc = self.tier.etc
+        rsa = f"{etc}/cdroperator_rsa"
+        ssh = f"ssh -i {rsa} -o LogLevel=error -o StrictHostKeyChecking=no"
         usr = "cdroperator"
         dns = "cancerinfo.nci.nih.gov"
         src = "%s@%s:/sftp/sftphome/cdrstaging/logs/*" % (usr, dns)
@@ -224,8 +249,9 @@ class Report(CDRTask):
         os.chdir(self.Month.LOGDIR)
         self.logger.info(cmd)
         cdr.run_command(cmd)
-        self.logger.info(fix)
-        cdr.run_command(fix)
+        if cdr.WORK_DRIVE:
+            self.logger.info(fix)
+            cdr.run_command(fix)
         os.chdir(cwd)
 
     def make_report(self, requests):
@@ -364,4 +390,5 @@ if __name__ == "__main__":
     parser.add_argument("--resend", action="store_true")
     parser.add_argument("--month")
     parser.add_argument("--recips")
-    Report(vars(parser.parse_args()), {}).Perform()
+    opts = vars(parser.parse_args())
+    Report(None, "Test of PDQ Access report", **opts).run()

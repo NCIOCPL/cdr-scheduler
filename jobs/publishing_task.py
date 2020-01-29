@@ -2,32 +2,24 @@
 Logic for nightly and weekly CDR publishing jobs.
 """
 
+import os
 import cdr
-from .cdr_task_base import CDRTask
-from core.exceptions import TaskException
-from .task_property_bag import TaskPropertyBag
+from .base_job import Job
 
-class PublishingTask(CDRTask):
+
+class PublishingTask(Job):
     """
-    Implements subclass for managing scheduled CDR publishing job.
+    Implements subclass for kicking off scheduled CDR publishing jobs.
+
     Other publishing jobs are run directly from the CDR Admin interface.
     """
 
     LOGNAME = "publishing-task"
 
-    def __init__(self, parms, data):
-        """
-        Initialize the base class then instantiate our Control object,
-        which does all the real work. The data argument is ignored.
-        """
-
-        CDRTask.__init__(self, parms, data)
-        self.control = Control(parms, self.logger)
-
-    def Perform(self):
+    def run(self):
         "Hand off the real work to the Control object."
-        self.control.run()
-        return TaskPropertyBag()
+        Control(self.opts, self.logger).run()
+
 
 class Control:
     """
@@ -35,7 +27,7 @@ class Control:
     we can provide a way to run this task from the command line.
     """
 
-    PUBPATH = "%s/publishing" % cdr.BASEDIR
+    PUBPATH = "%s/Publishing" % cdr.BASEDIR
     "Location of the publishing scripts."
 
     EXTRA_ARGS = {
@@ -75,20 +67,22 @@ class Control:
         self.skip_publish_step = options.get("skip-publish-step", False)
         self.publish_only = options.get("publish-only", False)
         if self.schedule not in ("weekly", "nightly"):
-            raise TaskException("schedule must be 'weekly' or 'nightly'")
+            raise Exception("schedule must be 'weekly' or 'nightly'")
         if self.mode not in ("test", "live"):
-            raise TaskException("mode must be 'live' or 'test'")
+            raise Exception("mode must be 'live' or 'test'")
         self.test = self.mode == "test"
         if self.job_id:
             try:
                 self.job_id = int(self.job_id)
             except:
-                raise TaskException("job-id must be an integer if specified")
+                raise Exception("job-id must be an integer if specified")
 
     def run(self):
-        """
-        Launches the following scripts synchronously. If any script
-        fails, or email notifications fail, we throw an exception.
+        """Launch the following scripts synchronously.
+
+        If any script fails, or email notifications fail, we throw an
+        exception. Avoid the extra weekly steps if testing on a non-Windows
+        system.
 
         SubmitPubJob.py
             Queues up the export and push requests and waits for them
@@ -115,6 +109,7 @@ class Control:
             Identifies any documents whose status has changed in such a
             way that they should be removed from cancer.gov with a manually-
             generated Hotfix-Remove request. Full weekly job only.
+
         """
 
         description = "%s%s" % (self.test and "test " or "", self.schedule)
@@ -123,12 +118,11 @@ class Control:
 
         if not self.skip_publish_step:
             self.launch("SubmitPubJob.py", merge_output=True)
-        if not self.publish_only:
+        if not self.publish_only and os.name == "nt":
             if self.schedule == "weekly":
                 self.launch("CG2Public.py")
                 self.launch("sftp-export-data.py", include_runmode=False,
                                                    include_pubmode=False)
-            if self.schedule == "weekly":
                 self.launch("Notify_VOL.py", include_pubmode=False)
                 self.launch("CheckHotfixRemove.py", include_pubmode=False)
         self.notify("finished")
@@ -176,7 +170,7 @@ class Control:
         message = "Program returned with error code. See log file."
         self.send_mail(subject, message)
         if script == "SubmitPubJob.py":
-            raise TaskException("failure in SubmitPubJob.py")
+            raise Exception("failure in SubmitPubJob.py")
 
     def failed(self, script, result):
         """
@@ -223,6 +217,7 @@ class Control:
             self.logger.debug(process.stdout)
             self.report_error(script)
 
+
 if __name__ == "__main__":
     """
     Make it possible to run this task from the command line.
@@ -238,7 +233,7 @@ if __name__ == "__main__":
                         required=True)
     parser.add_argument("--mode", choices=("test", "live"), required=True,
                         help="whether we should actually publish documents")
-    parser.add_argument("--doc-id", help="optional integer for publishing job",
+    parser.add_argument("--job-id", help="optional integer for publishing job",
                         type=int)
     parser.add_argument("--skip-publish-step", action="store_true",
                         help="do just the post-publishing steps")
@@ -249,6 +244,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     opts = dict([(k.replace("_", "-"), v) for k, v in args._get_kwargs()])
 
-    logging.basicConfig(format=cdr.Logging.FORMAT, 
+    logging.basicConfig(format=cdr.Logging.FORMAT,
                         level=args.log_level.upper())
     Control(opts, logging.getLogger()).run()

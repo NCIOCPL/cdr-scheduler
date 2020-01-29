@@ -1,45 +1,30 @@
-#----------------------------------------------------------------------
-#
-# Sweep up obsolete directories and files based on instructions in
-# a configuration file - deleting, truncating, or archiving files
-# and directories when required.
-#
-#----------------------------------------------------------------------
-import sys
+"""Keep disk space usage under control.
+
+Sweep up obsolete directories and files based on instructions in
+a configuration file - deleting, truncating, or archiving files
+and directories when required.
+"""
+
+import argparse
+import datetime
+import glob
 import os
 import os.path
-import getopt
-import glob
-import shutil
-import time
-import datetime
-import lxml.etree as et
-import traceback
 import re
-import xml.dom.minidom
+import shutil
+import sys
 import tarfile
-import logging
+import time
+import traceback
+import xml.dom.minidom
+import lxml.etree as et
 import cdr
 from cdrapi import db
 from cdrapi.settings import Tier
-
-"""
-Swap in replacement DB API implementation based on freetds (the original
-implementation, based on Microsoft's OLEDB, doesn't deal with multi-
-threading well).
-"""
-
-from .cdr_task_base import CDRTask
-from core.exceptions import TaskException
-from .task_property_bag import TaskPropertyBag
-
-# Scheduler log file (we don't use it directly ourselves).
-logger = logging.getLogger(__name__)
+from .base_job import Job
 
 # Filesweeper Logfile (separate from the scheduler's.)
-LOGNAME = "FileSweeper"
-LF = f"{cdr.DEFAULT_LOGDIR}/{LOGNAME}.log"
-FS_LOGGER = cdr.Logging.get_logger(LOGNAME)
+FS_LOGGER = None # supplied later by the FileSweeper object.
 
 # Don't go wild creating output files
 MAX_OUTPUT_FILES_WITH_ONE_NAME = 5
@@ -56,7 +41,8 @@ LONG_TIME = DAY_SECS * YEAR_DAYS * YEARS_OLD
 # Where are we running?
 TIER = Tier().name
 
-class FileSweeper(CDRTask):
+
+class FileSweeper(Job):
     """
     Adapter to allow the overall file clean up task to be driven
     from the CDR scheduler.
@@ -65,28 +51,28 @@ class FileSweeper(CDRTask):
         ConfigFile  Full or relative path to configuration file.
 
     Optional jobParam fields:
-        TestMode    Boolean value. Create output files but delete nothing. (default False.)
+        TestMode    Boolean value. Create output files but delete nothing.
+                    (default False)
         Email       Alternate email list for fatal error msgs.
                     If more than one address, use '+' as separator, no spaces.
                     e.g, joe@nih.gov+bill@nih.gov+jane@somewhere.com
         OutputDir   Optional path to prepend to archive file output directory.
     """
 
-    def __init__(self, jobParams, taskData):
-        CDRTask.__init__(self, jobParams, taskData)
+    LOGNAME = "FileSweeper"
 
-    def Perform(self):
-        result = TaskPropertyBag()
+    def run(self):
+
+        global FS_LOGGER
+        FS_LOGGER = self.logger
 
         # Gather parameters.
-        configFile = self.get_required_param('ConfigFile')
-        testMode = self.get_optional_param('TestMode', False)
-        email = self.get_optional_param('Email', '')
-        outputDir = self.get_optional_param('OutputDir', '')
+        configFile = self.opts.get('ConfigFile')
+        testMode = self.opts.get('TestMode', False)
+        email = self.opts.get('Email', '')
+        outputDir = self.opts.get('OutputDir', '')
 
         sweepFiles(configFile, testMode, email, outputDir)
-
-        return result
 
 
 #----------------------------------------------------------------------
@@ -948,6 +934,8 @@ def loadConfigFile(fileName):
     Change in Hawking release: pull configuration from the repository
     if possible, otherwise fall back on disk file.
 
+    Later change: use file on disk if named, otherwise go to the database.
+
     Pass:
         Path to config file.
 
@@ -961,41 +949,42 @@ def loadConfigFile(fileName):
         File contents invalid.
     """
 
-    # Pull the file from the repository if available there
-    cursor = db.connect(user="CdrGuest").cursor()
-    cursor.execute("""\
-        SELECT v.id, MAX(v.num)
-          FROM doc_version v
-          JOIN doc_type t
-            ON t.id = v.doc_type
-         WHERE t.name = 'SweepSpecifications'
-           AND v.val_status = 'V'
-      GROUP BY v.id""")
-    rows = cursor.fetchall()
-    if len(rows) > 1:
-        fatalError("More than on SweepSpecifications document found")
-    elif len(rows) == 1:
-        doc_id, version = rows[0]
-        query = db.Query("doc_version", "xml")
-        query.where(query.Condition("id", doc_id))
-        query.where(query.Condition("num", version))
-        row = query.execute(cursor).fetchone()
-        args = doc_id, version
-        try:
-            dom = xml.dom.minidom.parseString(row[0].encode("utf-8"))
-            msg = "loaded config from CDR%d version %d"
-            FS_LOGGER.info(msg, *args)
-        except Exception as e:
-            msg = "Failure parsing config document CDR%d version %d"
-            FS_LOGGER.exception(msg, *args)
-
-    # Otherwise, parse file from disk (temporary fallback)
-    else:
+    # Take the configuration from the disk if requested.
+    if fileName:
         try:
             dom = xml.dom.minidom.parse(fileName)
             FS_LOGGER.info("loaded config from %s", fileName)
         except Exception as info:
             fatalError("Error loading config file %s: %s" % (fileName, info))
+
+        # Otherwise pull the file from the repository.
+    else:
+        cursor = db.connect(user="CdrGuest").cursor()
+        cursor.execute("""\
+            SELECT v.id, MAX(v.num)
+              FROM doc_version v
+              JOIN doc_type t
+                ON t.id = v.doc_type
+             WHERE t.name = 'SweepSpecifications'
+               AND v.val_status = 'V'
+          GROUP BY v.id""")
+        rows = cursor.fetchall()
+        if len(rows) > 1:
+            fatalError("More than on SweepSpecifications document found")
+        elif len(rows) == 1:
+            doc_id, version = rows[0]
+            query = db.Query("doc_version", "xml")
+            query.where(query.Condition("id", doc_id))
+            query.where(query.Condition("num", version))
+            row = query.execute(cursor).fetchone()
+            args = doc_id, version
+            try:
+                dom = xml.dom.minidom.parseString(row[0].encode("utf-8"))
+                msg = "loaded config from CDR%d version %d"
+                FS_LOGGER.info(msg, *args)
+            except Exception as e:
+                msg = "Failure parsing config document CDR%d version %d"
+                FS_LOGGER.exception(msg, *args)
 
     # List of loaded specifications
     spec = []
@@ -1014,24 +1003,6 @@ def loadConfigFile(fileName):
                     spec.append(ss)
 
     return spec
-
-#----------------------------------------------------------------------
-# Usage message
-#----------------------------------------------------------------------
-def usage(msg=None):
-    if msg:
-        sys.stderr.write("%s\n" % msg)
-
-    sys.stderr.write("""
-usage: FileSweeper.py {options} configFileName {outputDir}
-  options:
-   -t --test       = Test mode - create output files but delete nothing.
-   -e --email list = Supply this alternate email list for fatal error msgs.
-                     If more than one address, use '+' as separator, no spaces.
-                      e.g, joe@nih.gov+bill@nih.gov+jane@somewhere.com
-   configFileName  = Full or relative path to configuration file.
-   outputDir       = Optional path to prepend to archive file output directory.
-""")
 
 #----------------------------------------------------------------------
 # Normalize a path
@@ -1163,7 +1134,7 @@ Error message was:
     else:
         FS_LOGGER.info("No mail sent")
 
-    raise TaskException(errorBody)
+    raise Exception(errorBody)
 
 
 #----------------------------------------------------------------------
@@ -1183,7 +1154,7 @@ def sweepFiles(passedConfigFile, passedTestMode=False, passedRecips=None,
     outputDir = passedOutputDir
 
     # Don't allow two filesweepers to run at the same time
-    lockFileName = "/cdr/log/FileSweeper.lockfile"
+    lockFileName = f"{cdr.DEFAULT_LOGDIR}/FileSweeper.lockfile"
     needToReleaseLockFile = True
     try:
         if not cdr.createLockFile(lockFileName):
@@ -1327,28 +1298,15 @@ remove the file "%s" to enable FileSweeper to run.
 #----------------------------------------------------------------------
 if __name__ == '__main__':
 
-    # Defaults for command line args
-    testMode  = False
-    recips    = None
-    outputDir = ""
-
-    # Command line args
-    (opts, args) = getopt.getopt(sys.argv[1:], "te:", ["test", "email="])
-    if len(args) < 1 or len(args) > 3:
-        usage()
-        sys.exit(1)
-    configFile = args[0]
-    if len(args) > 1:
-        for opt, arg in opts:
-            if opt in ('-t', '--test'):
-                testMode = True
-            elif opt in ('-e', '--email'):
-                recips = arg.split('+')
-
-    # If there is another arg, it's the output directory prefix
-    if len(args) > 1:
-        outputDir = args[1]
-    else:
-        outputDir = ""
-
-    sweepFiles(configFile, testMode, recips, outputDir)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--test", "-t", action="store_true",
+                        help="create output files but delete nothing")
+    parser.add_argument("--email", "-e",
+                        help="separate multiple addresses with + (no spaces)")
+    parser.add_argument("--config-file", "-c", help="optional config file")
+    parser.add_argument("--output-dir", "-o",
+                        help="optional path to prepend to output directory")
+    opts = parser.parse_args()
+    recips = opts.email.split("+") if opts.email else None
+    FS_LOGGER = cdr.Logging.get_logger(FileSweeper.LOGNAME)
+    sweepFiles(opts.config_file, opts.test, recips, opts.output_dir or "")
