@@ -57,7 +57,7 @@ class Terms:
     SERVER = socket.gethostname().split(".")[0]
     SENDER = "cdr@{}.nci.nih.gov".format(SERVER.lower())
     SUBJECT = "DUPLICATE GLOSSARY TERM NAME MAPPINGS ON " + SERVER.upper()
-    UNREPORTED = set(["tpa", "cab", "ctx", "receptor"])
+    UNREPORTED = set() # see OCECDR-4795 set(["tpa", "cab", "ctx", "receptor"])
     GROUP = "glossary-servers"
 
     def __init__(self, logger=None, recip=None):
