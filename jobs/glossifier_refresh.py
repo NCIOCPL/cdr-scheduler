@@ -120,7 +120,7 @@ class Terms:
             if self.recip:
                 recips = [self.recip]
             else:
-                recips = CDRTask.get_group_email_addresses(group)
+                recips = Job.get_group_email_addresses(group)
             if not recips:
                 raise Exception("no recips found for glossary failure message")
             tier = self.tier.name
@@ -346,7 +346,7 @@ class Terms:
         if self.recip:
             recips = [self.recip]
         else:
-            recips = CDRTask.get_group_email_addresses("GlossaryDupGroup")
+            recips = Job.get_group_email_addresses("GlossaryDupGroup")
         if not recips:
             raise Exception("no recipients found for glossary dup message")
         body = ["The following {:d} sets of ".format(len(self.dups)),
