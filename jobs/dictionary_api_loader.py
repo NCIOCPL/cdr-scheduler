@@ -89,6 +89,7 @@ class GlossaryLoader(DictionaryAPILoader):
             query.join("document d", "d.id = c.id")
             query.join("doc_type t", "t.id = d.doc_type")
             query.where("t.name = 'GlossaryTermName'")
+            query.log()
             rows = query.execute(self.cursor).fetchall()
             self._ids = sorted([row.id for row in rows])
         return self._ids
@@ -134,7 +135,7 @@ if __name__ == "__main__":
     opts = parser.parse_args()
     if opts.dump:
         loaders = dict(drugs=DrugLoader, glossary=GlossaryLoader)
-        loader = loaders[opts.dictionary]()
+        loader = loaders[opts.dictionary](**vars(opts))
         action = dict(index=dict(_index=loader.ALIAS))
         if opts.verbose:
             done = 0
@@ -152,4 +153,4 @@ if __name__ == "__main__":
         if opts.verbose:
             sys.stderr.write("\n")
     else:
-        Loader(None, f"Load {opts['dictionary']}", **vars(opts)).run()
+        Loader(None, f"Load {opts.dictionary}", **vars(opts)).run()
