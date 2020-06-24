@@ -24,3 +24,15 @@ scipt.
 The [`jobs`](jobs) directory contains the base `Job` class, as well as
 the modules implementing the derived classes for each of the jobs
 managed by the scheduler.
+
+## Command-Line Testing
+
+Most of the modules used to implement the scheduled jobs have a conditional
+block at the bottom to allow the module to be run as a script from the
+command-line. To use this feature, open a console window in the parent
+of the `jobs` directory and use the `-m` flag to name the module, being
+sure the include the package name. For example:
+
+```bash
+python -m jobs.file_sweeper_task --test --email kathy@example.com
+```

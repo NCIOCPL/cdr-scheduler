@@ -372,7 +372,13 @@ class Control:
                 module = import_module(f"jobs.{module_name}")
                 args = self.__control, self.name
                 getattr(module, class_name)(*args, **self.opts).run()
-                args = start, datetime.now() - start, self.name
+                elapsed = str(datetime.now() - start)
+                if "." not in elapsed:
+                    elapsed += ".000000"
+                started = str(start)
+                if "." not in started:
+                    started += ".000000"
+                args = started, elapsed, self.name
                 self.logger.info("Job started %s, elapsed %s (%s)", *args)
             except Exception:
                 self.logger.exception("%s started %s", self.name, start)

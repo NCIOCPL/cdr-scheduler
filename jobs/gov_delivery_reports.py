@@ -113,6 +113,9 @@ class Control:
 
         recip
             optional email address for testing so we don't spam others
+
+        timeout
+            how many seconds we'll wait for a connection or a query
         """
 
         self.TODAY = datetime.date.today()
@@ -127,7 +130,8 @@ class Control:
         self.end = options.get("end") or str(self.DEFAULT_END)
         self.test = self.mode == "test"
         self.recip = options.get("recip")
-        self.cursor = db.connect(user="CdrGuest").cursor()
+        timeout = int(options.get("timeout", 300))
+        self.cursor = db.connect(user="CdrGuest", timeout=timeout).cursor()
         if self.skip_email:
             self.logger.info("skipping email of reports")
 
@@ -634,7 +638,11 @@ class SummarySet:
         control.logger.debug(query)
 
         # Fetch the documents and pack up a sequence of Summary objects.
+        # query.log()
+        start = datetime.datetime.now()
         rows = query.execute(control.cursor).fetchall()
+        args = len(rows), datetime.datetime.now() - start
+        control.logger.debug("get_summaries(): %d rows in %s", *args)
         return [Summary(*row) for row in rows]
 
     def table(self):
@@ -679,10 +687,12 @@ def main():
     parser.add_argument("--log-level", choices=("info", "debug", "error"),
                         default="info", help="verbosity of logging")
     parser.add_argument("--reports", help="report(s) to run", nargs="*",
-                        choices=Control.REPORTS, default=Control.REPORTS)
+                        choices=Control.REPORTS, default=Control.REPORTS[:2])
     parser.add_argument("--start", help="optional start of date range")
     parser.add_argument("--end", help="optional end of date range")
-    parser.add_argument("--recip", help="optional email address for teseting")
+    parser.add_argument("--recip", help="optional email address for testing")
+    parser.add_argument("--timeout", type=int, default=300,
+                        help="how seconds to wait for SQL Server")
     args = parser.parse_args()
     opts = dict([(k.replace("_", "-"), v) for k, v in args._get_kwargs()])
     logging.basicConfig(format=cdr.Logging.FORMAT, level=args.log_level.upper())

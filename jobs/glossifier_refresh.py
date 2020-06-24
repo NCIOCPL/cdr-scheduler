@@ -57,7 +57,7 @@ class Terms:
     SERVER = socket.gethostname().split(".")[0]
     SENDER = "cdr@{}.nci.nih.gov".format(SERVER.lower())
     SUBJECT = "DUPLICATE GLOSSARY TERM NAME MAPPINGS ON " + SERVER.upper()
-    UNREPORTED = set(["tpa", "cab", "ctx", "receptor"])
+    UNREPORTED = set() # see OCECDR-4795 set(["tpa", "cab", "ctx", "receptor"])
     GROUP = "glossary-servers"
 
     def __init__(self, logger=None, recip=None):
@@ -120,7 +120,7 @@ class Terms:
             if self.recip:
                 recips = [self.recip]
             else:
-                recips = CDRTask.get_group_email_addresses(group)
+                recips = Job.get_group_email_addresses(group)
             if not recips:
                 raise Exception("no recips found for glossary failure message")
             tier = self.tier.name
@@ -202,6 +202,28 @@ class Terms:
                         names[name][doc_id][language] = list(dictionaries)
             self._data = names
         return self._data
+
+    @property
+    def extra_names(self):
+        """Fetch variant names from the external_map table."""
+
+        if not hasattr(self, "_extra_names"):
+            self._extra_names = {}
+            for langcode in Term.USAGES:
+                query = db.Query("external_map m", "m.value", "m.doc_id")
+                query.join("external_map_usage u", "u.id = m.usage")
+                query.where(query.Condition("u.name", Term.USAGES[langcode]))
+                rows = query.execute(self.cursor).fetchall()
+                args = len(rows), langcode
+                self.logger.debug("fetched %d extra %s names", *args)
+                names = {}
+                for name, doc_id in rows:
+                    if doc_id not in names:
+                        names[doc_id] = [name]
+                    else:
+                        names[doc_id].append(name)
+                self._extra_names[langcode] = names
+        return self._extra_names
 
     @property
     def names(self):
@@ -324,7 +346,7 @@ class Terms:
         if self.recip:
             recips = [self.recip]
         else:
-            recips = CDRTask.get_group_email_addresses("GlossaryDupGroup")
+            recips = Job.get_group_email_addresses("GlossaryDupGroup")
         if not recips:
             raise Exception("no recipients found for glossary dup message")
         body = ["The following {:d} sets of ".format(len(self.dups)),
@@ -369,7 +391,6 @@ class Term:
         "en": "GlossaryTerm Phrases",
         "es": "Spanish GlossaryTerm Phrases"
     }
-    EXTRA = { "en": None, "es": None }
 
     def __init__(self, terms, term_id, doc_xml, concept):
         """
@@ -397,35 +418,8 @@ class Term:
                     name = cdr.get_text(node.find("TermNameString"))
                     self.names["es"].append(self.Name(name))
         for language in self.USAGES:
-            self.names[language] += self.get_extra_names(language)
-
-    def get_extra_names(self, language):
-        """
-        Fetch variant names from the external_map table.
-
-        Optimized to do this once per language, as it increases
-        the performance time by a considerable amount when we use
-        two separate queries for each term name document.
-        """
-
-        if self.EXTRA[language] is None:
-            usage = self.USAGES[language]
-            query = db.Query("external_map m", "m.value", "m.doc_id")
-            query.join("external_map_usage u", "u.id = m.usage")
-            query.where(query.Condition("u.name", usage))
-            rows = query.execute(self.terms.cursor).fetchall()
-            args = len(rows), language
-            self.terms.logger.debug("fetched %d extra %s names", *args)
-            extra = {}
-            for name, doc_id in rows:
-                if doc_id not in extra:
-                    extra[doc_id] = [name]
-                else:
-                    extra[doc_id].append(name)
-            self.EXTRA[language] = extra
-            #open("extra.{}".format(language), "w").write(repr(extra))
-        names = self.EXTRA[language].get(self.id, [])
-        return [self.Name(name) for name in names]
+            for name in terms.extra_names[language].get(term_id, []):
+                self.names[language].append(self.Name(name))
 
     def record_usages(self, usages):
         """
@@ -474,13 +468,21 @@ if __name__ == "__main__":
     opts = parser.parse_args()
     terms = Terms()
     if opts.json:
-        print((json.dumps(terms.data, indent=2)))
+        print(json.dumps(terms.data, indent=2))
     else:
+        from sys import stdout
         t = pprint.pformat(terms.names, indent=4)
-        print((re.sub(r"set\(\[\s+", "set([", t).replace(" u'es'", " 'es'")))
+        t = re.sub(r"set\(\[\s+", "set([", t).replace(" u'es'", " 'es'")
+        stdout.buffer.write(t.encode("utf-8"))
+        stdout.buffer.write(b"\n")
         if opts.show_dups:
-            print(("=" * 60))
-            print(("DUPLICATES".center(60)))
-            print(("=" * 60))
+            stdout.buffer.write(b"=" * 60)
+            stdout.buffer.write(b"\n")
+            stdout.buffer.write("DUPLICATES".center(60).encode("utf-8"))
+            stdout.buffer.write(b"\n")
+            stdout.buffer.write(b"=" * 60)
+            stdout.buffer.write(b"\n")
             for key in terms.dups:
-                print((repr((key, terms.dups[key]))))
+                dup = repr((key, terms.dups[key]))
+                stdout.buffer.write(dup.encode("utf-8"))
+                stdout.buffer.write(b"\n")

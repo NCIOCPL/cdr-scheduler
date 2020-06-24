@@ -39,14 +39,14 @@ None of the following parameter options are required:
 """
 
 from .base_job import Job
-from cdr import EmailMessage
+from cdr import EmailMessage, run_command
 from cdrpub import Control
 from cdrapi import db
 from cdrapi.docs import Doc
 from cdrapi.users import Session
 from datetime import date, datetime
 from glob import glob
-from os import chdir
+from os import chdir, remove
 from re import search
 from shutil import rmtree
 
@@ -61,6 +61,9 @@ class Check(Job):
         start = datetime.now()
         if self.debug:
             self.logger.setLevel("DEBUG")
+            directory = Control.Media.MEDIA.replace("/", "\\")
+            process = run_command(fr"dir {directory} /s")
+            self.logger.debug("Akamai directory\n%s", process.stdout)
         self.errors = []
         self.report_rows = []
         try:
@@ -123,14 +126,14 @@ class Check(Job):
                 self.report_rows.append((p, "dropped"))
                 self.logger.info("%s dropped")
                 if self.fix:
-                    os.remove(p)
+                    remove(p)
         for id in self.catalog:
             if id not in ids:
                 self.logger.info("CDR%d no longer published", id)
                 for p in self.catalog[id]:
                     self.report_rows.append((p, "dropped"))
                     if self.fix:
-                        os.remove(p)
+                        remove(p)
 
     def send_report(self):
         """Send email message listing media file changes."""

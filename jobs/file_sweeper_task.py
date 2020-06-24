@@ -860,7 +860,7 @@ SweepSpec: "%s"
                 saveXml  = cdr.makeCdrDoc(newXml, 'Media', docObj.id)
                 response = cdr.repDoc(session, doc=saveXml,
                             comment='Removed meeting recording blobs',
-                            delAllBlobVersions=True)
+                                      delAllBlobVersions=True, check_in=True)
 
                 # Check response
                 if not response[0]:

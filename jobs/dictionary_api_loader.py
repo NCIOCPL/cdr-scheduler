@@ -89,6 +89,7 @@ class GlossaryLoader(DictionaryAPILoader):
             query.join("document d", "d.id = c.id")
             query.join("doc_type t", "t.id = d.doc_type")
             query.where("t.name = 'GlossaryTermName'")
+            query.log()
             rows = query.execute(self.cursor).fetchall()
             self._ids = sorted([row.id for row in rows])
         return self._ids
@@ -117,7 +118,7 @@ class DrugLoader(DictionaryAPILoader):
 if __name__ == "__main__":
     """Support testing from the command line."""
 
-    import argparse
+    import argparse, json, sys
     parser = argparse.ArgumentParser()
     choices = "drugs", "glossary"
     parser.add_argument("--dictionary", "-d", choices=choices, required=True)
@@ -130,5 +131,26 @@ if __name__ == "__main__":
     parser.add_argument("--recips", "-r")
     parser.add_argument("--test", action="store_true")
     parser.add_argument("--limit", type=int)
-    opts = vars(parser.parse_args())
-    Loader(None, f"Load {opts['dictionary']}", **opts).run()
+    parser.add_argument("--dump", action="store_true")
+    opts = parser.parse_args()
+    if opts.dump:
+        loaders = dict(drugs=DrugLoader, glossary=GlossaryLoader)
+        loader = loaders[opts.dictionary](**vars(opts))
+        action = dict(index=dict(_index=loader.ALIAS))
+        if opts.verbose:
+            done = 0
+        for term_id in loader.ids:
+            doc = loader.Doc(loader, term_id)
+            for node in doc.nodes:
+                action["index"]["_id"] = node.id
+                action["index"]["_type"] = node.doc_type
+                source = {node.doc_type: node.values}
+                print(json.dumps(action))
+                print(json.dumps(node.values))
+            if opts.verbose:
+                done += 1
+                sys.stderr.write(f"\rdone {done} of {len(loader.ids)}")
+        if opts.verbose:
+            sys.stderr.write("\n")
+    else:
+        Loader(None, f"Load {opts.dictionary}", **vars(opts)).run()
