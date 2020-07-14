@@ -13,6 +13,7 @@ My proposed approach for the last bullet is to have a pair of work tables, and:
  6. commit the transaction
 """
 
+from argparse import ArgumentParser
 from json import dumps
 from lxml import etree
 from cdrapi import db
@@ -68,7 +69,8 @@ class Loader(Job):
         """Connection to the PDQ dictionary tables."""
 
         if not hasattr(self, "_dictionary_conn"):
-            self._dictionary_conn = db.connect(database="pdq_dictionaries")
+            opts = dict(database="pdq_dictionaries", tier=self.tier)
+            self._dictionary_conn = db.connect(**opts)
         return self._dictionary_conn
 
     @property
@@ -84,7 +86,8 @@ class Loader(Job):
         """Database cursor for the CDR tables."""
 
         if not hasattr(self, "_cdr_cursor"):
-            self._cdr_cursor = db.connect(user="CdrGuest").cursor()
+            opts = dict(tier=self.tier, user="CdrGuest")
+            self._cdr_cursor = db.connect(**opts).cursor()
         return self._cdr_cursor
 
     @property
@@ -101,6 +104,13 @@ class Loader(Job):
             self.logger.info("found %d drug terms", len(self._ids))
         return self._ids
 
+    @property
+    def tier(self):
+        """Which database tier should we load to/from?"""
+
+        if not hasattr(self, "_tier"):
+            self._tier = self.opts.get("tier")
+        return self._tier
 
     class Drug:
         """CDR drug Term document to be loaded."""
@@ -245,4 +255,8 @@ INSERT INTO DictionaryTermAlias_Work (
 
 if __name__ == "__main__":
     """Don't execute script if loaded as a module."""
-    Loader(None, "Drug Loader").run()
+
+    parser = ArgumentParser()
+    parser.add_argument("--tier", "-t")
+    opts = vars(parser.parse_args())
+    Loader(None, "Drug Loader", **opts).run()
