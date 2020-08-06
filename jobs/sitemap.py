@@ -175,7 +175,7 @@ class Loader(Job):
             suffix = ""
             if "-dev" in self.hostname:
                 suffix = "-dev"
-            elif "-test" in self.hostname:
+            elif "-stage" in self.hostname:
                 suffix = "-test"
             self._keyfile = f"d:/etc/akamai-sitemap{suffix}"
         return self._keyfile
