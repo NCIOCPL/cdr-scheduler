@@ -14,6 +14,19 @@ class ReportTask(Job):
     Implements subclass for managing the monthly PCIB staticics report.
     """
 
+    SUPPORTED_PARAMETERS = {
+        "docs",
+        "email",
+        "end",
+        "ids",
+        "log-level",
+        "max-docs",
+        "mode",
+        "recips",
+        "sections",
+        "start",
+        "title",
+    }
     def run(self):
         "Hand off the real work to the Control object."
 

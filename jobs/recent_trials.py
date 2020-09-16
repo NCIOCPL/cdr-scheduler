@@ -25,6 +25,8 @@ class RefreshTask(Job):
     Implements subclass for managing the nightly refresh of trial info.
     """
 
+    SUPPORTED_PARAMETERS = {"cutoff"}
+
     def run(self):
         "Hand off the real work to the Control object."
         Control(self.opts).run()

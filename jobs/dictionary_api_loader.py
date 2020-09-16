@@ -13,6 +13,19 @@ class Loader(Job):
 
     LOGNAME = DictionaryAPILoader.LOGNAME
     FROM = "NCIPDQoperator@mail.nih.gov"
+    SUPPORTED_PARAMETERS = {
+        "dictionary",
+        "dump",
+        "host",
+        "ids",
+        "limit",
+        "loglevel",
+        "port",
+        "recips",
+        "test",
+        "tier",
+        "verbose",
+    }
 
     def run(self):
         """Pick a dictionary class and load the terms."""

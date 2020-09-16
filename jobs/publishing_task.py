@@ -15,6 +15,13 @@ class PublishingTask(Job):
     """
 
     LOGNAME = "publishing-task"
+    SUPPORTED_PARAMETERS = {
+        "job-id",
+        "mode",
+        "publish-only",
+        "schedule",
+        "skip-publish-step",
+    }
 
     def run(self):
         "Hand off the real work to the Control object."

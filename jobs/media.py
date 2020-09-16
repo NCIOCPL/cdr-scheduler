@@ -56,6 +56,14 @@ class Check(Job):
 
     LOGNAME = "check-media"
     PATTERNS = f"audio/*.mp3", f"images/*.jpg"
+    SUPPORTED_PARAMETERS = {
+        "debug",
+        "fix",
+        "force",
+        "nolock",
+        "recip",
+        "rsync",
+    }
 
     def run(self):
         start = datetime.now()

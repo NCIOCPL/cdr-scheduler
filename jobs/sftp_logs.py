@@ -26,6 +26,7 @@ class Refresh(Job):
 
     LOGNAME = "sftp-log-refresh"
     SYNCDIR = cdr.BASEDIR + "/sftp_log"
+    SUPPORTED_PARAMETERS = {}
 
     def run(self):
         """

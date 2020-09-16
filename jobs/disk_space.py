@@ -32,6 +32,7 @@ class Monitor(Job):
     LOGNAME = "disk-space-monitor"
     GB = 1024 * 1024 * 1024
     FROM = "NCIPDQoperator@mail.nih.gov"
+    SUPPORTED_PARAMETERS = {"recips", "cthreshold", "dthreshold"}
 
     @property
     def recips(self):
@@ -122,9 +123,7 @@ class Monitor(Job):
         parser.add_argument("--cthreshold", default=25, type=int)
         parser.add_argument("--dthreshold", default=50, type=int)
         parser.add_argument("--recips")
-        parser.add_argument("--level", default="info")
         opts = vars(parser.parse_args())
-        opts["log-level"] = opts.get("level")
         Monitor(None, "Disk Space Test", **opts).run()
 
 

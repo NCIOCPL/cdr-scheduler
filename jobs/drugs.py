@@ -28,6 +28,7 @@ class Loader(Job):
     API_VERSION = "v1"
     FILTER = "Drug Dictionary JSON"
     TABLES = "Dictionary", "DictionaryTermAlias"
+    SUPPORTED_PARAMETERS = {"tier"}
 
     def run(self):
         """Repopulate the PDQ dictionary tables with fresh drug information."""

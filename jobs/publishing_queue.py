@@ -13,6 +13,7 @@ class Sweeper(Job):
 
     LOGNAME = "publish"
     PUBSCRIPT = cdr.BASEDIR + "/publishing/publish.py"
+    SUPPORTED_PARAMETERS = {}
 
     def run(self):
         """Launch any publishing jobs which are in the queue.

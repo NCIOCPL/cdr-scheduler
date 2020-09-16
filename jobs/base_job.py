@@ -8,6 +8,11 @@ from cdrapi import db
 
 
 class Job:
+    """Override to implement a scheduled job class.
+
+    To enforce passing only supported parameters for a job type, set the
+    class-level SUPPORTED_PARAMETERS to a set of parameter names.
+    """
 
     import lxml.html.builder as B
     import lxml.html as HTML
@@ -28,11 +33,22 @@ class Job:
         "encoding": "unicode",
         "doctype": "<!DOCTYPE html>"
     }
+    SUPPORTED_PARAMETERS = None
 
     def __init__(self, control, name, **opts):
         self.control = control
         self.name = name
         self.opts = opts
+        if self.opts and self.SUPPORTED_PARAMETERS is not None:
+            unsupported = set(self.opts) - set(self.SUPPORTED_PARAMETERS)
+            if unsupported:
+                unsupported = sorted(unsupported)
+                if len(unsupported) == 1:
+                    msg = f"unsupported parameter {unsupported[0]}"
+                else:
+                    unsupported = ", ".join(unsupported)
+                    msg = "unsupported parameters: {unsupported}"
+                raise Exception(msg)
 
     @property
     def logger(self):

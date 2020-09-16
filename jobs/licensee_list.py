@@ -15,6 +15,7 @@ class ReportTask(Job):
     """
 
     LOGNAME = "licensees"
+    SUPPORTED_PARAMETERS = {"mode", "recip", "skip-email"}
 
     def run(self):
         "Hand off the real work to the Control object."
