@@ -60,7 +60,7 @@ class FileSweeper(Job):
     """
 
     LOGNAME = "FileSweeper"
-    SUPPORTER_PARAMETERS = {"ConfigFile", "TestMode", "Email", "OutputDir"}
+    SUPPORTED_PARAMETERS = {"ConfigFile", "TestMode", "Email", "OutputDir"}
 
     def run(self):
 
