@@ -98,8 +98,10 @@ class Loader(Job):
         if not hasattr(self, "_ids"):
             query = db.Query("pub_proc_cg c", "c.id").unique().order("c.id")
             query.join("query_term t", "t.doc_id = c.id")
-            query.where("t.path = '/Term/SemanticType'")
-            query.where("t.value = 'Drug/agent'")
+            query.join("query_term s", "s.doc_id = t.int_val")
+            query.where("t.path = '/Term/SemanticType/@cdr:ref'")
+            query.where("s.path = '/Term/PreferredName'")
+            query.where("s.value = 'Drug/agent'")
             rows = query.execute(self.cdr_cursor).fetchall()
             self._ids = [row.id for row in rows]
             self.logger.info("found %d drug terms", len(self._ids))
