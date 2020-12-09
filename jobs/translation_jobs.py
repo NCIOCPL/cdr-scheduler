@@ -13,6 +13,7 @@ class ReportTask(Job):
     """
 
     LOGNAME = "scheduled_translation_job_report"
+    SUPPORTED_PARAMETERS = {"mode", "doctype", "recip", "schedule"}
 
     def run(self):
         Control(self.opts, self.logger).run()
@@ -565,6 +566,7 @@ def main():
     args = parser.parse_args()
     opts = dict([(k.replace("_", "-"), v) for k, v in args._get_kwargs()])
     logging.basicConfig(format=cdr.Logging.FORMAT, level=args.log_level.upper())
+    del opts["log-level"]
     Control(opts, logging.getLogger()).run()
 
 if __name__ == "__main__":

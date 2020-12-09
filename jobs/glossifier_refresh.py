@@ -41,6 +41,7 @@ class Task(Job):
     """
 
     LOGNAME = "glossifier"
+    SUPPORTED_PARAMETERS = {"log-level", "recip"}
 
     def run(self):
         level = self.opts.get("log-level", "INFO")

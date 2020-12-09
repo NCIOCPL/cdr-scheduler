@@ -9,6 +9,8 @@ from io import StringIO
 
 class Reporter(Job):
 
+    SUPPORTED_PARAMETERS = {"recips"}
+
     def run(self):
         opts = dict(subject=self.subject, body=self.report)
         EmailMessage(OPERATOR, self.recips, **opts).send()

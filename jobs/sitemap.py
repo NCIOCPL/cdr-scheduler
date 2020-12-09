@@ -33,6 +33,7 @@ class Loader(Job):
             English="publications/dictionaries/cancer-drug/def"
         ),
     )
+    SUPPORTED_PARAMETERS = {"tier", "hostname", "username", "keep", "dump"}
 
     def run(self):
         """Create the sitemap document and store it on Akamai's servers.

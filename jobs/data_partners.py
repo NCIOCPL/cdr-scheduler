@@ -41,6 +41,7 @@ class Notify(Job):
     MAX_TRIES = 5
     DELAY = 5
     MODES = "test", "live"
+    SUPPORTED_PARAMETERS = {"job", "superlog", "recip", "mode"}
 
     test_recips = None
 
@@ -579,10 +580,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     choices = "test", "live"
     parser.add_argument("--mode", choices=choices, required=True)
-    parser.add_argument("--level", default="debug")
     parser.add_argument("--job", type=int)
     parser.add_argument("--superlog", action="store_true")
     parser.add_argument("--recip")
     opts = vars(parser.parse_args())
-    opts["log-level"] = opts["level"]
     Notify(None, "Notification Test", **opts).run()

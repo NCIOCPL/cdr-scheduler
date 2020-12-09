@@ -14,6 +14,15 @@ class ReportTask(Job):
     """
 
     LOGNAME = "gov_delivery_reports"
+    SUPPORTED_PARAMETERS = {
+        "end",
+        "mode",
+        "recip",
+        "reports",
+        "skip-email",
+        "start",
+        "timeout",
+    }
 
     def run(self):
         "Hand off the real work to the Control object."

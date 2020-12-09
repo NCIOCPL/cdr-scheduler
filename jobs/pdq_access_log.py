@@ -45,6 +45,7 @@ class Report(Job):
     LABELS = "Login", "Partner", "Path", "Session", "Date", "Time"
     NON_PARTNERS = cdr.getControlValue("PDQ", "non-partners", "")
     NON_PARTNERS = set(NON_PARTNERS.split(","))
+    SUPPORTED_PARAMETERS = {"month", "noemail", "recips", "resend"}
 
     def run(self):
         """
@@ -385,7 +386,6 @@ if __name__ == "__main__":
     """
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--level", default="debug")
     parser.add_argument("--noemail", action="store_true")
     parser.add_argument("--resend", action="store_true")
     parser.add_argument("--month")
