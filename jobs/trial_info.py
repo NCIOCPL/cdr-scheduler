@@ -22,10 +22,9 @@ class Loader(Job):
       * debug (increase level of logging)
       * host (override ElasticSearch host name)
       * limit (throttle the number of concepts for testing)
-      * max_sleep (override maximum number of seconds to sleep on failure)
+      * sleep (override maximum number of seconds to sleep on failure)
       * port (override ElasticSearch port number)
       * test (write to the file system, not ElasticSearch)
-      * tier (override the default ElasticSearch tier)
       * verbose (write progress to the console)
     """
 
@@ -55,9 +54,8 @@ class Loader(Job):
         "host",
         "limit",
         "port",
-        "max_sleep",
+        "sleep",
         "test",
-        "tier",
         "verbose",
     }
 
@@ -235,7 +233,7 @@ class Loader(Job):
         """Longest we will wait between fetch failures."""
 
         if not hasattr(self, "_max_sleep"):
-            seconds = float(self.opts.get("max_sleep") or self.MAX_SLEEP)
+            seconds = float(self.opts.get("sleep") or self.MAX_SLEEP)
             self._max_sleep = max(seconds, self.MIN_SLEEP)
         return self._max_sleep
 
@@ -298,7 +296,7 @@ class Loader(Job):
         """Which CDR tier are we using?"""
 
         if not hasattr(self, "_tier"):
-            self._tier = Tier(self.opts.get("tier"))
+            self._tier = Tier()
         return self._tier
 
     @property
@@ -655,14 +653,19 @@ if __name__ == "__main__":
     """Don't launch the script if loaded as a module."""
 
     parser = ArgumentParser()
-    parser.add_argument("--debug", action="store_true", help="more logging")
-    parser.add_argument("--dump", "-d", action="store_true")
-    parser.add_argument("--host")
-    parser.add_argument("--limit")
-    parser.add_argument("--max-sleep")
-    parser.add_argument("--port")
-    parser.add_argument("--test", action="store_true")
-    parser.add_argument("--tier")
-    parser.add_argument("--verbose", "-v", action="store_true")
+    parser.add_argument("--debug", action="store_true", help="do more logging")
+    parser.add_argument("--dump", "-d", action="store_true",
+                        help="save files for testing the API")
+    parser.add_argument("--host", help="ElasticSearch server")
+    parser.add_argument("--limit", type=float,
+                        help="maximum concepts to fetch from the EVS")
+    parser.add_argument("--sleep", type=int, metavar="SECONDS",
+                        help="longest delay between fetch failures")
+    parser.add_argument("--port", type=int,
+                        help="ElasticSearch port (default 9400)")
+    parser.add_argument("--test", action="store_true",
+                        help="save to file system, not ElasticSearch")
+    parser.add_argument("--verbose", "-v", action="store_true",
+                        help="show progress on the command line")
     opts = parser.parse_args()
     Loader(None, "Load dynamic trial info", **vars(opts)).run()
