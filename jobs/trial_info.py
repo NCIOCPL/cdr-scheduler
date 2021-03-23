@@ -8,7 +8,7 @@ from re import compile
 from sys import stderr
 from time import sleep
 from unicodedata import combining, normalize
-from elasticsearch5 import Elasticsearch
+from elasticsearch7 import Elasticsearch
 from requests import get
 from .base_job import Job
 from cdr import getControlValue
@@ -26,6 +26,7 @@ class Loader(Job):
       * port (override ElasticSearch port number)
       * test (write to the file system, not ElasticSearch)
       * verbose (write progress to the console)
+      * groups (locally cached dump of listing info records)
     """
 
     URL = "https://evsrestapi.nci.nih.gov/evsrestapi/api/v1/ctrp/concept/{}"
@@ -51,6 +52,7 @@ class Loader(Job):
     SUPPORTED_PARAMETERS = {
         "debug",
         "dump",
+        "groups",
         "host",
         "limit",
         "port",
@@ -72,7 +74,7 @@ class Loader(Job):
 
         if self.opts.get("debug"):
             self.logger.setLevel("DEBUG")
-        groups = [group.values for group in self.groups]
+        groups = self.groups
         labels = [label for label in self.labels]
         if self.dump:
             self.__dump(groups, labels)
@@ -118,6 +120,18 @@ class Loader(Job):
         """Sequence of groups of concepts sharing display names."""
 
         if not hasattr(self, "_groups"):
+
+            # Use a locally cached dump if one is specified.
+            groups = self.opts.get("groups")
+            if groups:
+                self._groups = []
+                with open(groups) as fp:
+                    for line in fp:
+                        values = loads(line.strip())
+                        if "concept_id" in values:
+                            self._groups.append(values)
+                return self._groups
+
             groups = dict()
             start = datetime.now()
             for code in self.TOP:
@@ -175,6 +189,7 @@ class Loader(Job):
                     other = urls[group.url]
                     message = f"{group.url} used by {group.key} and {other}"
                     raise Exception(message)
+            self._groups = [group.values for group in self._groups]
             if self.verbose:
                 stderr.write("\n")
         return self._groups
@@ -333,16 +348,17 @@ class Loader(Job):
         actions = []
         if self.es.indices.exists_alias(name=alias):
             aliases = self.es.indices.get_alias(alias)
-            for index in aliases:
-                if "aliases" in aliases[index]:
-                    if alias in aliases[index]["aliases"]:
+            for old_index in aliases:
+                if "aliases" in aliases[old_index]:
+                    if alias in aliases[old_index]["aliases"]:
                         actions.append(dict(
                             remove=dict(
-                                index=index,
+                                index=old_index,
                                 alias=alias,
                             )
                         ))
         actions.append(dict(add=dict(index=index, alias=alias)))
+        # stderr.write(f"actions: {actions}\n")
         self.es.indices.update_aliases(body=dict(actions=actions))
 
     def __dump(self, groups, labels):
@@ -353,18 +369,18 @@ class Loader(Job):
           labels - sequence of value dictionaries for TrialTypeInformation
         """
 
-        action = dict(index=dict(_index=self.INFO_ALIAS, _type=self.INFO))
+        action = dict(index=dict(_index=self.INFO_ALIAS))
         action = dumps(action)
         with open(f"{self.INFO}.dump", "w") as fp:
             for group in groups:
                 fp.write(f"{action}\n")
-                fp.write(f"{json.dumps(group)}\n")
-        action = dict(index=dict(_index=self.TRIAL_ALIAS, _type=self.TRIAL))
+                fp.write(f"{dumps(group)}\n")
+        action = dict(index=dict(_index=self.TRIAL_ALIAS))
         action = dumps(action)
         with open(f"{self.TRIAL}.dump", "w") as fp:
             for label in labels:
                 fp.write(f"{action}\n")
-                fp.write(f"{json.dumps(label)}\n")
+                fp.write(f"{dumps(label)}\n")
 
     def __fetch(self, code):
         """Fetch a concept and its children recursively.
@@ -423,24 +439,32 @@ class Loader(Job):
         self.es.indices.create(index=trial_index, body=self.trial_def)
         if self.verbose:
             stderr.write("indexes created\n")
-        opts = dict(index=info_index, doc_type=self.INFO)
+        opts = dict(index=info_index) #, doc_type=self.INFO)
         if self.verbose:
             done = 0
         for group in groups:
             self.logger.debug("indexing %s", group["concept_id"])
             opts["body"] = group
-            self.es.index(**opts)
+            try:
+                self.es.index(**opts)
+            except Exception as e:
+                stderr.write(f"\n{group}\n")
+                raise
             if self.verbose:
                 done += 1
                 stderr.write(f"\r{done} of {len(groups)} groups indexed")
         if self.verbose:
             stderr.write(f"\n{info_index} populated\n")
             done = 0
-        opts = dict(index=trial_index, doc_type=self.TRIAL)
+        opts = dict(index=trial_index) #, doc_type=self.TRIAL)
         for label in labels:
             self.logger.debug("indexing label %s", label["id_string"])
             opts["body"] = label
-            self.es.index(**opts)
+            try:
+                self.es.index(**opts)
+            except Exception as e:
+                stderr.write(f"\n{label}\n")
+                raise
             if self.verbose:
                 done += 1
                 stderr.write(f"\r{done} of {len(labels)} labels indexed")
@@ -575,11 +599,12 @@ class Group:
         """Pull what we need from the caller's Concept object.
 
         Pass:
-            loader - access to logger
+            loader - access to logger and tokens
             concept - object with the group's common display name
         """
 
         self.logger = loader.logger
+        self.preserve = loader.tokens
         self.name = concept.name
         self.key = concept.key
         self.codes = []
@@ -593,13 +618,13 @@ class Group:
         """Display name mostly lowercased for use in running text.
 
         Lowercase each word in the name except for those appearing
-        in the PRESERVE list.
+        in self.preserve.
         """
 
         if not hasattr(self, "_phrase"):
             words = []
             for word in self.name.split():
-                if word not in self.PRESERVE:
+                if word not in self.preserve:
                     word = word.lower()
                 words.append(word)
             self._phrase = " ".join(words)
@@ -667,5 +692,7 @@ if __name__ == "__main__":
                         help="save to file system, not ElasticSearch")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="show progress on the command line")
+    parser.add_argument("--groups", "-g",
+                        help="dump file name for listing info records")
     opts = parser.parse_args()
     Loader(None, "Load dynamic trial info", **vars(opts)).run()
