@@ -24,7 +24,8 @@ class Loader(Job):
     PATTERNS = dict(
         term=dict(
             English="publications/dictionaries/cancer-terms/def",
-            Spanish="espanol/publicaciones/diccionario/def",
+            Spanish="espanol/publicaciones/diccionarios"
+                    "/diccionario-cancer/def",
         ),
         genetic=dict(
             English="publications/dictionaries/genetics-dictionary/def",
