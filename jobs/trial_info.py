@@ -19,6 +19,7 @@ class Loader(Job):
     """Top-level control for job.
 
     Options:
+      * auth (optional comma-separated username and password)
       * debug (increase level of logging)
       * host (override ElasticSearch host name)
       * limit (throttle the number of concepts for testing)
@@ -50,6 +51,7 @@ class Loader(Job):
     MAX_SLEEP = 500
     MAX_PRETTY_URL_LENGTH = 75
     SUPPORTED_PARAMETERS = {
+        "auth",
         "debug",
         "dump",
         "groups",
@@ -89,6 +91,17 @@ class Loader(Job):
             stderr.write("done\n")
 
     @property
+    def auth(self):
+        """Username, password tuple."""
+
+        if not hasattr(self, "_auth"):
+            self._auth = None
+            auth = self.opts.get("auth")
+            if auth:
+                self._auth = auth.split(",", 1)
+        return self._auth
+
+    @property
     def concepts(self):
         """Dictionary of Concept objects, indexed by code.
 
@@ -107,6 +120,8 @@ class Loader(Job):
 
         if not hasattr(self, "_es"):
             opts = dict(host=self.host, port=self.port, timeout=300)
+            if self.auth:
+                opts["http_auth"] = self.auth
             self._es = Elasticsearch([opts])
         return self._es
 
@@ -694,5 +709,7 @@ if __name__ == "__main__":
                         help="show progress on the command line")
     parser.add_argument("--groups", "-g",
                         help="dump file name for listing info records")
+    parser.add_argument("--auth", "-a",
+                        help="comma-separated username/password")
     opts = parser.parse_args()
     Loader(None, "Load dynamic trial info", **vars(opts)).run()
