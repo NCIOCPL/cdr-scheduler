@@ -23,15 +23,15 @@ class Loader(Job):
     NS = f"{{{NS}}}"
     PATTERNS = dict(
         term=dict(
-            English="publications/dictionaries/cancer-terms/def",
-            Spanish="espanol/publicaciones/diccionarios"
-                    "/diccionario-cancer/def",
+            English="publications/dictionaries/cancer-terms",
+            Spanish="espanol/publicaciones/diccionarios/diccionario-cancer",
         ),
         genetic=dict(
-            English="publications/dictionaries/genetics-dictionary/def",
+            English="publications/dictionaries/genetics-dictionary",
+            Spanish="espanol/publicaciones/diccionarios/diccionario-genetica",
         ),
         drug=dict(
-            English="publications/dictionaries/cancer-drug/def"
+            English="publications/dictionaries/cancer-drug"
         ),
     )
     SUPPORTED_PARAMETERS = {"tier", "hostname", "username", "keep", "dump"}
@@ -101,7 +101,7 @@ class Loader(Job):
                     self.logger.warning(message, *args)
                     url = id
                 pattern = self.PATTERNS[key][lang]
-                url = f"https://www.cancer.gov/{pattern}/{url}"
+                url = f"https://www.cancer.gov/{pattern}/def/{url}"
                 if url not in urls:
                     urls[url] = []
                 urls[url].append((lang, key, id))
