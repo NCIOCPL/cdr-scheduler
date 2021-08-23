@@ -148,7 +148,7 @@ class Notify(Job):
             recips = [self.recip]
         else:
             recips = self.ops
-        message = open(self.job.report_path).read() + "</ul>"
+        message = open(self.job.report_path, encoding="utf-8").read() + "</ul>"
         subject = "Summary Report on Notification: %s" % self.job.subject
         self.send(recips, subject, message)
         self.logger.info("sent summary report to %r", recips)
