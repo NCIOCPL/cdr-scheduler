@@ -3,7 +3,7 @@
 
 from argparse import ArgumentParser
 from datetime import datetime
-from json import dump, dumps, loads
+from json import dump, dumps, loads, load
 from re import compile
 from sys import stderr
 from time import sleep
@@ -20,6 +20,7 @@ class Loader(Job):
 
     Options:
       * auth (optional comma-separated username and password)
+      * concepts (locally cached dump of listing info records)
       * debug (increase level of logging)
       * host (override ElasticSearch host name)
       * limit (throttle the number of concepts for testing)
@@ -52,6 +53,7 @@ class Loader(Job):
     MAX_PRETTY_URL_LENGTH = 75
     SUPPORTED_PARAMETERS = {
         "auth",
+        "concepts",
         "debug",
         "dump",
         "groups",
@@ -149,13 +151,30 @@ class Loader(Job):
 
             groups = dict()
             start = datetime.now()
-            for code in self.TOP:
-                self.__fetch(code)
-            args = len(self.concepts), datetime.now() - start
+            concepts = self.opts.get("concepts")
+            if concepts:
+                class CachedConcept:
+                    def __init__(self, code, name):
+                        self.code = code
+                        self.name = name
+                        self.key = name.lower()
+                with open(concepts) as fp:
+                    concepts = [CachedConcept(*values) for values in load(fp)]
+            else:
+                for code in self.TOP:
+                    self.__fetch(code)
+                concepts = self.concepts.values()
+                if self.dump:
+                    values = [(c.code, c.name) for c in concepts]
+                    values = [(int(v[0][1:]), v[0], v[1]) for v in values]
+                    values = [v[1:] for v in sorted(values)]
+                    with open(f"concepts-{self.stamp}.json", "w") as fp:
+                        dump(values, fp, indent=2)
+            args = len(concepts), datetime.now() - start
             self.logger.info("fetched %d concepts in %s", *args)
             if self.verbose:
                 stderr.write("\n")
-            for concept in self.concepts.values():
+            for concept in concepts:
                 if concept.code in self.BAD:
                     continue
                 group = groups.get(concept.key)
@@ -709,6 +728,7 @@ if __name__ == "__main__":
                         help="show progress on the command line")
     parser.add_argument("--groups", "-g",
                         help="dump file name for listing info records")
+    parser.add_argument("--concepts", "-c", help="dump of concept values")
     parser.add_argument("--auth", "-a",
                         help="comma-separated username/password")
     opts = parser.parse_args()
