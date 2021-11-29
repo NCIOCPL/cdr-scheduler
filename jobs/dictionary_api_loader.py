@@ -2,7 +2,7 @@
 """
 
 from datetime import datetime
-from cdr import EmailMessage
+from cdr import EmailMessage, getpw, isProdHost
 from cdrapi.docs import Doc
 from dictionary_loader import DictionaryAPILoader
 from .base_job import Job
@@ -32,6 +32,11 @@ class Loader(Job):
         """Pick a dictionary class and load the terms."""
 
         started = datetime.now()
+        if self.opts.get("tier") == "PROD" and not isProdHost():
+            if not self.opts.get("auth"):
+                pw = getpw("esadmin")
+                if pw:
+                    self.opts["auth"] = f"admin,{pw}"
         if self.dictionary == "glossary":
             loader = GlossaryLoader(**self.opts)
         elif self.dictionary == "drugs":
