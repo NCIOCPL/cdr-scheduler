@@ -38,6 +38,7 @@ class Sweeper(Job):
             if os.name == "nt":
                 os.spawnv(os.P_NOWAIT, cdr.PYTHON, args)
 
+
 if __name__ == "__main__":
     """Enable command-line testing."""
     Sweeper(None, "Publishing Queue").run()

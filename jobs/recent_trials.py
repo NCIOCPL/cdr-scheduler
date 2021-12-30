@@ -73,7 +73,7 @@ class Control:
         try:
             if self.fetch():
                 self.record()
-        except Exception as e:
+        except Exception:
             self.logger.exception("failed")
             raise
 
@@ -101,7 +101,7 @@ class Control:
         params = params.replace(" ", "+")
 
         # Submit the request to NLM's server.
-        base  = "http://clinicaltrials.gov/ct2/results"
+        base = "http://clinicaltrials.gov/ct2/results"
         url = "%s?%s" % (base, params)
         self.logger.info(url)
         try:
@@ -186,6 +186,7 @@ INSERT INTO ctgov_trial_sponsor (nct_id, position, sponsor)
 
         return datetime.datetime.strptime(date, "%Y-%m-%d").date()
 
+
 class Trial:
     """
     Object holding information about a single clinical_trial document.
@@ -252,6 +253,7 @@ def main():
     args = parser.parse_args()
     opts = dict([(k.replace("_", "-"), v) for k, v in args._get_kwargs()])
     Control(opts).run()
+
 
 if __name__ == "__main__":
     """Run the job if loaded as a script (not a module)."""

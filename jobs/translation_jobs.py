@@ -7,6 +7,7 @@ from cdrapi import db
 import datetime
 from .base_job import Job
 
+
 class ReportTask(Job):
     """
     Subclass for managing scheduled summary translation job reports.
@@ -529,7 +530,6 @@ class User(ReportTools):
                 body.append(table)
             table.append(job.tr())
 
-
     class Job:
 
         def __init__(self, state, date, doc_id, title):
@@ -564,10 +564,12 @@ def main():
     parser.add_argument("--schedule", choices=Control.SCHEDULES)
     parser.add_argument("--recip")
     args = parser.parse_args()
+    opts = dict(format=cdr.Logging.FORMAT, level=args.log_level.upper())
+    logging.basicConfig(**opts)
     opts = dict([(k.replace("_", "-"), v) for k, v in args._get_kwargs()])
-    logging.basicConfig(format=cdr.Logging.FORMAT, level=args.log_level.upper())
     del opts["log-level"]
     Control(opts, logging.getLogger()).run()
+
 
 if __name__ == "__main__":
     main()

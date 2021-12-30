@@ -6,7 +6,7 @@ for this report.
 """
 
 from .base_job import Job
-from cdr_stats import Control
+from cdr_stats import Control, main
 
 
 class ReportTask(Job):
@@ -27,6 +27,7 @@ class ReportTask(Job):
         "start",
         "title",
     }
+
     def run(self):
         "Hand off the real work to the Control object."
 
@@ -42,4 +43,4 @@ if __name__ == "__main__":
     Make it possible to run this task from the command line.
     """
 
-    cdr_stats.main()
+    main()

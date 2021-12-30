@@ -11,7 +11,7 @@ from cdrapi import db
 class Sweeper(Job):
 
     LOGNAME = "batch-job-queue"
-    SUPPORTED_PARAMETERS = set() # no parameter options are accepted
+    SUPPORTED_PARAMETERS = set()  # no parameter options are accepted
 
     def run(self):
         """Launch any batch jobs which are in the queue."""

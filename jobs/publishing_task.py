@@ -81,7 +81,7 @@ class Control:
         if self.job_id:
             try:
                 self.job_id = int(self.job_id)
-            except:
+            except Exception:
                 raise Exception("job-id must be an integer if specified")
 
     def run(self):
@@ -129,7 +129,7 @@ class Control:
             if self.schedule == "weekly":
                 self.launch("CG2Public.py")
                 self.launch("sftp-export-data.py", include_runmode=False,
-                                                   include_pubmode=False)
+                            include_pubmode=False)
                 self.launch("Notify_VOL.py", include_pubmode=False)
                 self.launch("CheckHotfixRemove.py", include_pubmode=False)
         self.notify("finished")

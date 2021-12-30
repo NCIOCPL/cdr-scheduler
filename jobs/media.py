@@ -55,7 +55,7 @@ class Check(Job):
     """Report on discrepancies between repository and file system."""
 
     LOGNAME = "check-media"
-    PATTERNS = f"audio/*.mp3", f"images/*.jpg"
+    PATTERNS = "audio/*.mp3", "images/*.jpg"
     SUPPORTED_PARAMETERS = {
         "debug",
         "fix",

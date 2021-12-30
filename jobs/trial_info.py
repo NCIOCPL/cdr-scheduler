@@ -320,7 +320,7 @@ class Loader(Job):
                 raise Exception("no database port specified")
             try:
                 self._port = int(port)
-            except:
+            except Exception:
                 raise Exception("invalid port value")
             if self.verbose:
                 stderr.write(f"connecting on port {self._port}\n")
@@ -490,7 +490,7 @@ class Loader(Job):
         self.es.indices.create(index=trial_index, body=self.trial_def)
         if self.verbose:
             stderr.write("indexes created\n")
-        opts = dict(index=info_index) #, doc_type=self.INFO)
+        opts = dict(index=info_index)
         if self.verbose:
             done = 0
         for group in groups:
@@ -498,7 +498,7 @@ class Loader(Job):
             opts["body"] = group
             try:
                 self.es.index(**opts)
-            except Exception as e:
+            except Exception:
                 stderr.write(f"\n{group}\n")
                 raise
             if self.verbose:
@@ -513,7 +513,7 @@ class Loader(Job):
             opts["body"] = label
             try:
                 self.es.index(**opts)
-            except Exception as e:
+            except Exception:
                 stderr.write(f"\n{label}\n")
                 raise
             if self.verbose:
@@ -667,7 +667,7 @@ class Group:
             for code in self.codes:
                 codes.append(int(self.NON_DIGITS.sub("", code)))
             self._values = dict(
-                concept_id = [f"C{code:d}" for code in sorted(codes)],
+                concept_id=[f"C{code:d}" for code in sorted(codes)],
                 name=dict(
                     label=self.name,
                     normalized=self.phrase,

@@ -324,7 +324,8 @@ class Control:
         """
 
         if url:
-            return cls.B.LI(cls.B.A(text, href=url, style="font-family: Arial"))
+            opts = dict(href=url, style="font-family: Arial")
+            return cls.B.LI(cls.B.A(text, **opts))
         return cls.B.LI(text, style="font-family: Arial")
 
     @classmethod
@@ -422,6 +423,7 @@ class TrialSet:
     def __init__(self, control):
         "Create and execute the database query to collect the report's trials."
         self.control = control
+        end = f"{control.end} 23:59:59"
         activated = "ISNULL(c.became_active, 0)"
         columns = ("c.nlm_id", "c.cdr_id", "c.became_active", "q.value")
         query = db.Query("ctgov_import c", *columns)
@@ -429,7 +431,7 @@ class TrialSet:
         query.join("query_term_pub q", "q.doc_id = c.cdr_id")
         query.where("q.path = '/CTGovProtocol/BriefTitle'")
         query.where(query.Condition(activated, control.start, ">="))
-        query.where(query.Condition(activated, control.end + " 23:59:59", "<="))
+        query.where(query.Condition(activated, end, "<="))
         control.logger.debug("query:\n%s", query)
         query.order("c.nlm_id").execute(control.cursor)
         rows = control.cursor.fetchall()
@@ -469,7 +471,7 @@ class TrialSet:
                 Control.th("Title"),
                 Control.th("Activated")
             ),
-            style = Control.TSTYLE
+            style=Control.TSTYLE
         )
         for trial in self.trials:
             self.control.logger.debug(str(trial))
@@ -660,7 +662,7 @@ class SummarySet:
         style += "; text-align: left;"
         table = Control.B.TABLE(
             Control.B.CAPTION(self.caption, style=style),
-            style = Control.TSTYLE,
+            style=Control.TSTYLE,
         )
         if self.summaries:
             headers = Control.B.TR(
@@ -687,7 +689,6 @@ def main():
     import logging
     fc = argparse.ArgumentDefaultsHelpFormatter
     desc = "Report on new/changed CDR documents for GovDelivery"
-    reports = ["english", "spanish", "trials"]
     parser = argparse.ArgumentParser(description=desc, formatter_class=fc)
     parser.add_argument("--mode", choices=("test", "live"), required=True,
                         help="controls who gets the report")
@@ -703,9 +704,11 @@ def main():
     parser.add_argument("--timeout", type=int, default=300,
                         help="how seconds to wait for SQL Server")
     args = parser.parse_args()
+    opts = dict(format=cdr.Logging.FORMAT, level=args.log_level.upper())
+    logging.basicConfig(**opts)
     opts = dict([(k.replace("_", "-"), v) for k, v in args._get_kwargs()])
-    logging.basicConfig(format=cdr.Logging.FORMAT, level=args.log_level.upper())
     Control(opts, logging.getLogger()).run()
+
 
 if __name__ == "__main__":
     main()

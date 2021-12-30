@@ -16,6 +16,7 @@ from dateutil.relativedelta import relativedelta
 import cdr
 from .base_job import Job
 
+
 class Refresh(Job):
     """
     Job for refreshing local mirror of sftp pdq log files

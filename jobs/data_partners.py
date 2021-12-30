@@ -59,7 +59,7 @@ class Notify(Job):
             url = f"https://{cdr.APPC}/cgi-bin/cdr/get-pdq-contacts.py"
             self.logger.info("fetching contacts from %r", url)
             root = etree.fromstring(requests.get(url).content)
-            contacts = [Contact(self, node) for node in root.findall("contact")]
+            contacts = [Contact(self, n) for n in root.findall("contact")]
             self.logger.info("%d contacts fetched", len(contacts))
             self._contacts = contacts
         return self._contacts
@@ -203,7 +203,7 @@ class Notify(Job):
                 if self.log_messages:
                     self.logger.debug(msg)
                 return msg
-            except Exception as e:
+            except Exception:
                 self.logger.exception("failure sending to %r", recips)
                 tries += 1
                 if tries >= self.MAX_TRIES:
@@ -212,7 +212,6 @@ class Notify(Job):
                 self.logger.debug("pausing %s seconds", delay)
                 time.sleep(delay)
                 delay += self.DELAY
-
 
     class ExportJob:
         """
@@ -366,7 +365,7 @@ class Contact:
     TODAY = datetime.date.today()
     EXPIRATION_THRESHOLD = str(TODAY - datetime.timedelta(100))
     WARNING_THRESHOLD = str(TODAY - datetime.timedelta(80))
-    TYPE_STRINGS = { "T": "Test", "A": "Active", "S": "Special" }
+    TYPE_STRINGS = {"T": "Test", "A": "Active", "S": "Special"}
     DELAY = 3
     TABLE = "data_partner_notification"
     COLS = "email_addr, notif_date"

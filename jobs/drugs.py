@@ -14,7 +14,6 @@ My proposed approach for the last bullet is to have a pair of work tables, and:
 """
 
 from argparse import ArgumentParser
-from json import dumps
 from lxml import etree
 from cdrapi import db
 from cdrapi.docs import Doc
