@@ -65,7 +65,7 @@ class ReportTask(Job):
         query.join("query_term t", "t.doc_id = u.doc_id")
         query.where(f"u.path = '{self.U_PATH}'")
         query.where(f"d.path = '{self.D_PATH}'")
-        query.where(f"d.value >= '{self.cutoff}'")
+        query.where(f"d.value <= '{self.cutoff}'")
         query.where(f"t.path = '{self.T_PATH}'")
         query.where("t.value = 'Yes'")
         query.order("u.doc_id", "d.value DESC")
