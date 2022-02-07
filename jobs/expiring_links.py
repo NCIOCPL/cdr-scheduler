@@ -94,7 +94,7 @@ class ReportTask(Job):
                 recips = Job.get_group_email_addresses(group)
         if not recips:
             raise Exception("No recipients for report")
-        subject = f"[{Tier().name}] Expiring links"
+        subject = f"[{Tier().name}] Drug Information Summaries Expiring Links"
         self.logger.info("sending %s to %r", subject, recips)
         opts = dict(subject=subject, body=self.table, subtype="html")
         return EmailMessage(self.SENDER, recips, **opts)
