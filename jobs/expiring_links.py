@@ -61,12 +61,14 @@ class ReportTask(Job):
     def links(self):
         fields = "u.doc_id", "u.value AS url", "d.value AS date"
         query = db.Query("query_term u", *fields).unique()
-        query.join("query_term d", "d.doc_id = u.doc_id")
-        query.join("query_term t", "t.doc_id = u.doc_id")
+        query.join("query_term d", "d.doc_id = u.doc_id",
+                   "LEFT(d.node_loc, 4) = LEFT(u.node_loc, 4)")
+        query.join("query_term t", "t.doc_id = u.doc_id",
+                   "LEFT(t.node_loc, 4) = LEFT(u.node_loc, 4)")
         query.where(f"u.path = '{self.U_PATH}'")
         query.where(f"d.path = '{self.D_PATH}'")
-        query.where(f"d.value <= '{self.cutoff}'")
         query.where(f"t.path = '{self.T_PATH}'")
+        query.where(f"d.value <= '{self.cutoff}'")
         query.where("t.value = 'Yes'")
         query.order("u.doc_id", "d.value DESC")
         rows = query.execute(self.cursor).fetchall()

@@ -54,8 +54,10 @@ class LinkRemover(ScheduledJob):
 
         fields = "u.doc_id", "u.value AS url", "d.value AS date"
         query = db.Query("query_term u", "u.doc_id").unique()
-        query.join("query_term d", "d.doc_id = u.doc_id")
-        query.join("query_term t", "t.doc_id = u.doc_id")
+        query.join("query_term d", "d.doc_id = u.doc_id",
+                   "LEFT(d.node_loc, 4) = LEFT(u.node_loc, 4)")
+        query.join("query_term t", "t.doc_id = u.doc_id",
+                   "LEFT(t.node_loc, 4) = LEFT(u.node_loc, 4)")
         query.where(f"u.path = '{self.U_PATH}'")
         query.where(f"d.path = '{self.D_PATH}'")
         query.where(f"d.value <= '{self.cutoff}'")
