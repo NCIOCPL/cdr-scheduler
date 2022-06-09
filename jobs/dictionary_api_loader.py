@@ -2,7 +2,8 @@
 """
 
 from datetime import datetime
-from cdr import EmailMessage
+from cdr import EmailMessage, getpw, isProdHost
+from cdrapi.docs import Doc
 from dictionary_loader import DictionaryAPILoader
 from .base_job import Job
 
@@ -13,6 +14,7 @@ class Loader(Job):
     LOGNAME = DictionaryAPILoader.LOGNAME
     FROM = "NCIPDQoperator@mail.nih.gov"
     SUPPORTED_PARAMETERS = {
+        "auth",
         "dictionary",
         "dump",
         "host",
@@ -30,6 +32,11 @@ class Loader(Job):
         """Pick a dictionary class and load the terms."""
 
         started = datetime.now()
+        if self.opts.get("tier") == "PROD" and not isProdHost():
+            if not self.opts.get("auth"):
+                pw = getpw("esadmin")
+                if pw:
+                    self.opts["auth"] = f"admin,{pw}"
         if self.dictionary == "glossary":
             loader = GlossaryLoader(**self.opts)
         elif self.dictionary == "drugs":
@@ -90,7 +97,7 @@ class GlossaryLoader(DictionaryAPILoader):
 
     TYPE = "glossary"
     ALIAS = "glossaryv1"
-    INDEXDEF = "glossary.json"
+    INDEXDEF = "glossary"
 
     @property
     def ids(self):
@@ -111,7 +118,7 @@ class DrugLoader(DictionaryAPILoader):
 
     TYPE = "drug"
     ALIAS = "drugv1"
-    INDEXDEF = "drugs.json"
+    INDEXDEF = "drugs"
 
     @property
     def ids(self):
@@ -148,6 +155,7 @@ if __name__ == "__main__":
     parser.add_argument("--test", action="store_true")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--dump", action="store_true")
+    parser.add_argument("--auth", "-a", help="username,password")
     opts = parser.parse_args()
     if opts.dump:
         loaders = dict(drugs=DrugLoader, glossary=GlossaryLoader)
@@ -159,7 +167,6 @@ if __name__ == "__main__":
             doc = loader.Doc(loader, term_id)
             for node in doc.nodes:
                 action["index"]["_id"] = node.id
-                action["index"]["_type"] = node.doc_type
                 source = {node.doc_type: node.values}
                 print(json.dumps(action))
                 print(json.dumps(node.values))
