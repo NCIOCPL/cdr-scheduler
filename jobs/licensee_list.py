@@ -9,6 +9,7 @@ import requests
 import cdr
 from cdrapi import db
 
+
 class ReportTask(Job):
     """
     Implements subclass for managing the monthly licensee report.
@@ -435,6 +436,7 @@ if __name__ == "__main__":
                         default="info", help="verbosity of logging")
     parser.add_argument("--recip", help="optional email address for testing")
     args = parser.parse_args()
+    opts = dict(format=cdr.Logging.FORMAT, level=args.log_level.upper())
+    logging.basicConfig(**opts)
     opts = dict([(k.replace("_", "-"), v) for k, v in args._get_kwargs()])
-    logging.basicConfig(format=cdr.Logging.FORMAT, level=args.log_level.upper())
     Control(opts, logging.getLogger()).run()

@@ -24,7 +24,7 @@ from cdrapi.settings import Tier
 from .base_job import Job
 
 # Filesweeper Logfile (separate from the scheduler's.)
-FS_LOGGER = None # supplied later by the FileSweeper object.
+FS_LOGGER = None  # supplied later by the FileSweeper object.
 
 # Don't go wild creating output files
 MAX_OUTPUT_FILES_WITH_ONE_NAME = 5
@@ -33,7 +33,7 @@ MAX_OUTPUT_FILES_WITH_ONE_NAME = 5
 BLOCK_SIZE = 4096
 
 # Date constants, YEARS_OLD is max time we'll look back, sanity check
-DAY_SECS  = 86400
+DAY_SECS = 86400
 YEAR_DAYS = 365.25
 YEARS_OLD = 10
 LONG_TIME = DAY_SECS * YEAR_DAYS * YEARS_OLD
@@ -76,30 +76,31 @@ class FileSweeper(Job):
         sweepFiles(configFile, testMode, email, outputDir)
 
 
-#----------------------------------------------------------------------
+# ---------------------------------------------------------------------
 # Class encapsulating actions on one file
-#----------------------------------------------------------------------
+# ---------------------------------------------------------------------
 class qualFile:
 
     def __init__(self, fileName):
         # Default values
-        self.fileName  = fileName
+        self.fileName = fileName
 
         # Stat file
         fstat = os.stat(self.fileName)
 
         # Save info
-        self.fsize     = fstat.st_size
-        self.mtime     = fstat.st_mtime
+        self.fsize = fstat.st_size
+        self.mtime = fstat.st_mtime
 
         # Nothing done to this file yet
-        self.archived  = False
+        self.archived = False
         self.truncated = False
-        self.deleted   = False
+        self.deleted = False
 
-#----------------------------------------------------------------------
+
+# ---------------------------------------------------------------------
 # Class encapsulating the elements in a specification
-#----------------------------------------------------------------------
+# ---------------------------------------------------------------------
 class SweepSpec:
 
     def __init__(self, specNode):
@@ -111,39 +112,39 @@ class SweepSpec:
         """
 
         # Initialize specification invalid values
-        self.specName      = "Unknown"  # Name for report
-        self.action        = None       # What to do with files
-        self.root          = None       # Where to look for files
-        self.inFiles       = []         # File paths to look for
-        self.outFile       = None       # Output file for archive
-        self.oldSpec       = None       # If at least one file older than this
-        self.youngSpec     = None       # Files must be older than this
-        self.maxSizeSpec   = None       # If file bigger than this
-        self.truncSizeSpec = None       # Truncate file to this size
-        self.customProc    = None       # Name of custom sweep routine, if any
+        self.specName = "Unknown"  # Name for report
+        self.action = None         # What to do with files
+        self.root = None           # Where to look for files
+        self.inFiles = []          # File paths to look for
+        self.outFile = None        # Output file for archive
+        self.oldSpec = None        # If at least one file older than this
+        self.youngSpec = None      # Files must be older than this
+        self.maxSizeSpec = None    # If file bigger than this
+        self.truncSizeSpec = None  # Truncate file to this size
+        self.customProc = None     # Name of custom sweep routine, if any
 
         # Start with the assumption that spec applies to all tiers.
-        self.tiers         = None
+        self.tiers = None
 
         # Set this flag to true when the archive is successfully saved
-        self.okayToDelete  = False
+        self.okayToDelete = False
 
         # These fields track what actually matches the specification
         # Initialized to invalid values, filled in by self.statFiles()
-        self.oldestDate    = 0      # Date of oldest file found in root/inFiles
-        self.youngestDate  = 0      # Date of youngest found
-        self.biggestSize   = 0      # Size of biggest file found
-        self.smallestSize  = 0      # Size of smallest
-        self.totalList     = []     # All names of files found in root/inFiles
-        self.qualifiedList = []     # qualFile objects qualified for action
-        self.totalBytes    = 0      # Total bytes in all files
-        self.qualifiedBytes= 0      # Total bytes in qualified files
-        self.archivedFiles = 0      # Number successfully archived
-        self.archivedBytes = 0      #    "        "          "
-        self.truncFiles    = 0      # Number successfully truncated
-        self.truncBytes    = 0      #    "        "          "
-        self.msgs          = []     # Messages accrued during processing
-        self.statted       = False  # Info has been collected
+        self.oldestDate = 0        # Date of oldest file found in root/inFiles
+        self.youngestDate = 0      # Date of youngest found
+        self.biggestSize = 0       # Size of biggest file found
+        self.smallestSize = 0      # Size of smallest
+        self.totalList = []        # All names of files found in root/inFiles
+        self.qualifiedList = []    # qualFile objects qualified for action
+        self.totalBytes = 0        # Total bytes in all files
+        self.qualifiedBytes = 0    # Total bytes in qualified files
+        self.archivedFiles = 0     # Number successfully archived
+        self.archivedBytes = 0        # "        "          "
+        self.truncFiles = 0        # Number successfully truncated
+        self.truncBytes = 0           # "        "          "
+        self.msgs = []             # Messages accrued during processing
+        self.statted = False       # Info has been collected
 
         # All times relative to right now, normalized to previous midnight
         now = normTime(time.time())
@@ -160,9 +161,9 @@ class SweepSpec:
                 if elem == 'Name':
                     self.specName = cdr.getTextContent(node)
                 elif elem == 'Action':
-                    self.action   = cdr.getTextContent(node)
+                    self.action = cdr.getTextContent(node)
                 elif elem == 'InputRoot':
-                    self.root     = cdr.getTextContent(node)
+                    self.root = cdr.getTextContent(node)
                 elif elem == 'InputFiles':
                     for child in node.childNodes:
                         if child.nodeType == xml.dom.minidom.Node.ELEMENT_NODE:
@@ -179,10 +180,10 @@ class SweepSpec:
                     self.outFile = cdr.getTextContent(node)
                 elif elem == 'Oldest':
                     # Convert to UNIX time = seconds since epoch
-                    days         = int(cdr.getTextContent(node))
+                    days = int(cdr.getTextContent(node))
                     self.oldSpec = now - (days * DAY_SECS)
                 elif elem == 'Youngest':
-                    days           = int(cdr.getTextContent(node))
+                    days = int(cdr.getTextContent(node))
                     self.youngSpec = now - (days * DAY_SECS)
                 elif elem == 'Biggest':
                     self.maxSizeSpec = int(cdr.getTextContent(node))
@@ -211,7 +212,7 @@ class SweepSpec:
                 fatalError(msg.format(self.specName))
 
         # Validate combinations of specs
-        if not self.outFile and self.action in ('Archive','TruncateArchive'):
+        if not self.outFile and self.action in ('Archive', 'TruncateArchive'):
             msg = "No output file specified for SweepSpec {} with Action={}"
             fatalError(msg.format(self.specName, self.action))
         if not (self.oldSpec and self.youngSpec):
@@ -228,30 +229,28 @@ class SweepSpec:
                 msg = "Must specify Oldest for Custom SweepSpec '{}'"
                 fatalError(msg.format(self.specName))
 
-
         # Times should be reasonable e.g., now until 10 years before now
         if self.oldSpec:
             if self.oldSpec >= now or self.youngSpec and self.youngSpec >= now:
                 fatalError('A date >= current date in SweepSpec "%s"' %
-                            self.specName)
+                           self.specName)
             longAgo = now - LONG_TIME
 
             if self.oldSpec and self.oldSpec < longAgo:
                 fatalError(
-                    '"Oldest" date is older than %d years in SweepSpec "%s"' %
-                            (YEARS_OLD, self.specName))
+                    f'"Oldest" date is older than {YEARS_OLD:d} years '
+                    f'in SweepSpec "{self.specName}"')
             if self.youngSpec and self.youngSpec < longAgo:
                 fatalError(
-                    '"Youngest" date is older than %d years in SweepSpec "%s"' %
-                            (YEARS_OLD, self.specName))
-
+                    f'"Youngest" date is older than {YEARS_OLD:d} years '
+                    f'in SweepSpec "{self.specName}"')
 
         if self.oldSpec and self.maxSizeSpec:
             fatalError("Can't specify both big/small and old/young")
 
-    #----------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     # Is this spec to be used on this tier?
-    #----------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     def active(self):
         """
         Check to make sure this spec is not intended only for other tiers.
@@ -262,9 +261,9 @@ class SweepSpec:
             return True
         return False
 
-    #----------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     # Find files matching a spec
-    #----------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     def statFiles(self):
         """
         Find all files matching a SweepSpec specification.
@@ -303,8 +302,8 @@ class SweepSpec:
             self.totalBytes += fsize
 
             # Does this file qualify?
-            if ((self.youngSpec and mtime < self.youngSpec) or
-                (self.truncSizeSpec and fsize > self.truncSizeSpec)):
+            if (self.youngSpec and mtime < self.youngSpec or
+                    self.truncSizeSpec and fsize > self.truncSizeSpec):
 
                 # Yes, remember it
                 self.qualifiedList.append(fileObj)
@@ -340,9 +339,9 @@ class SweepSpec:
         # We should take action on this spec
         return True
 
-    #----------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     # Stringify entire spec
-    #----------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     def __str__(self):
         """
         Display spec for debugging purposes.
@@ -350,48 +349,45 @@ class SweepSpec:
         # Convert date times for display
         old = young = oldest = youngest = None
         if self.oldSpec:
-            old      = time.strftime("%Y-%m-%d",
-                                     time.localtime(self.oldSpec))
-            young    = time.strftime("%Y-%m-%d",
-                                     time.localtime(self.youngSpec))
+            old = time.strftime("%Y-%m-%d",
+                                time.localtime(self.oldSpec))
+            young = time.strftime("%Y-%m-%d",
+                                  time.localtime(self.youngSpec))
         if self.oldestDate > 0:
-            oldest   = time.strftime("%Y-%m-%d",
-                                     time.localtime(float(self.oldestDate)))
+            oldest = time.strftime("%Y-%m-%d",
+                                   time.localtime(float(self.oldestDate)))
             youngest = time.strftime("%Y-%m-%d",
                                      time.localtime(self.youngestDate))
 
         # Basics from config file
         tiers = self.tiers and " ".join(sorted(self.tiers)) or "ALL"
-        specStr = """
-SweepSpec: "%s"
-    Action:     %s
-    Tiers:      %s
-    InputRoot:  %s
-    Files:      %s
-    OutputFile: %s
-    Oldest:     %s
-    Youngest:   %s
-    Biggest:    %s
-    Smallest:   %s
-""" % (self.specName, self.action, tiers, self.root, self.inFiles,
-       self.outFile, old, young, self.maxSizeSpec, self.truncSizeSpec)
+        specStr = f"""
+SweepSpec: "{self.specName}"
+    Action:     {self.action}
+    Tiers:      {tiers}
+    InputRoot:  {self.root}
+    Files:      {self.inFiles}
+    OutputFile: {self.outFile}
+    Oldest:     {old}
+    Youngest:   {young}
+    Biggest:    {self.maxSizeSpec}
+    Smallest:   {self.truncSizeSpec}
+"""
 
         # If statFiles() called, report statistics
         if self.statted:
-            specStr += """
+            specStr += f"""
   Statistics:
-        oldest:          %s
-        youngest:        %s
-        biggest:         %d
-        smallest:        %d
-        total files:     %d
-        qualified files: %d
-        total bytes:     %d
-        qualified bytes: %d
-        message count:   %d
-""" % (oldest, youngest, self.biggestSize, self.smallestSize,
-       len(self.totalList), len(self.qualifiedList),
-       self.totalBytes, self.qualifiedBytes, len(self.msgs))
+        oldest:          {oldest}
+        youngest:        {youngest}
+        biggest:         {self.biggestSize:d}
+        smallest:        {self.smallestSize:d}
+        total files:     {len(self.totalList):d}
+        qualified files: {len(self.qualifiedList):d}
+        total bytes:     {self.totalBytes:d}
+        qualified bytes: {self.qualifiedBytes:d}
+        message count:   {len(self.msgs):d}
+"""
 
         # Messages
         if self.msgs:
@@ -403,9 +399,9 @@ SweepSpec: "%s"
 
         return specStr
 
-    #----------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     # Archive files needing to be archived
-    #----------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     def archive(self, testMode):
         """
         Copy all qualified files into an archive file.
@@ -424,9 +420,8 @@ SweepSpec: "%s"
         # Create the output compressed tar archive
         try:
             tar = tarfile.open(self.outFile, "w:bz2")
-        except Exception as info:
-            fatalError('Could not open tarfile "%s" for writing'
-                        % self.outFile)
+        except Exception:
+            fatalError(f'Could not open tarfile "{self.outFile}" for writing')
 
         # Process each qualifying file
         for fobj in self.qualifiedList:
@@ -444,15 +439,15 @@ SweepSpec: "%s"
 
         try:
             tar.close()
-        except Exception as info:
+        except Exception:
             fatalError('Could not close tarfile "%s"' % self.outFile)
 
         # If here, everything okay, deletion can proceed
         self.delete(testMode)
 
-    #----------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     # Truncate files needing to be truncated
-    #----------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     def truncate(self, testMode):
         """
         Left truncate any files that exceed the specified maximum
@@ -493,9 +488,9 @@ SweepSpec: "%s"
         if self.action == "TruncateArchive":
             try:
                 tar = tarfile.open(self.outFile, "w:bz2")
-            except Exception as info:
+            except Exception:
                 fatalError('Could not open tarfile "%s" for writing'
-                            % self.outFile)
+                           % self.outFile)
 
         # Process each qualifying file
         for fileObj in self.qualifiedList:
@@ -531,16 +526,16 @@ SweepSpec: "%s"
                 destp.close()
                 srcp.close()
             except Exception as info:
-                self.addMsg(
-"""WARNING: Unable to create truncation of "%s::%s":
-   %s
-   Truncation was aborted""" % (self.specName, inFile, info))
+                self.addMsg(f"""\
+WARNING: Unable to create truncation of "{self.specName}::{inFile}":
+   {info}
+   Truncation was aborted""")
                 continue
 
             # Sanity debug checks
             if not os.path.exists(tmpFile):
                 fatalError('Temporary file "%s" not found - internal error'
-                            % tmpFile)
+                           % tmpFile)
             tmpstat = os.stat(tmpFile)
             if tmpstat.st_size != self.truncSizeSpec:
                 self.addMsg(
@@ -560,7 +555,7 @@ SweepSpec: "%s"
                         srcp.close()
                     except Exception as info:
                         self.addMsg('Unable to truncate "%s::%s": %s' %
-                                     (self.specName, inFile, info))
+                                    (self.specName, inFile, info))
                         continue
 
                     # Sanity debug checks
@@ -571,8 +566,10 @@ SweepSpec: "%s"
                          (inFile, fstat.st_size, self.truncSizeSpec))
                     if (tmpstat.st_size + fstat.st_size) != fileObj.fsize:
                         fatalError(
-      'File "%s": Truncated and remaining sizes %d + %d != original size %d' %
-                       (inFile, tmpstat.st_size, fstat.st_size, fileObj.fsize))
+                            f'File "{inFile}": Truncated and '
+                            f"remaining sizes {tmpstat.st_size:d} + "
+                            f"{fstat.st_size:d} != original size "
+                            f"{fileObj.fsize:d}")
 
                 # Archive the truncation
                 try:
@@ -588,7 +585,7 @@ SweepSpec: "%s"
                     shutil.move(tmpFile, inFile)
                 except Exception as info:
                     fatalError('Unable to replace original file "%s":\n   %s'
-                                    % (inFile, info))
+                               % (inFile, info))
 
             # If we got this far, the truncation has occurred
             fileObj.truncated = True
@@ -597,12 +594,12 @@ SweepSpec: "%s"
         if self.action == "TruncateArchive":
             try:
                 tar.close()
-            except Exception as info:
+            except Exception:
                 fatalError('Could not close tarfile "%s"' % self.outFile)
 
-    #----------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     # Delete files
-    #----------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     def delete(self, testMode):
         """
         Delete all files named in a specification.
@@ -626,7 +623,7 @@ SweepSpec: "%s"
                     fileObj.deleted = True
                 else:
                     self.addMsg('Test mode, not deleting "%s"' %
-                                 fileObj.fileName)
+                                fileObj.fileName)
             except Exception as info:
                 if nameIsDir:
                     self.addMsg("Error removing directory %s: %s" %
@@ -635,9 +632,9 @@ SweepSpec: "%s"
                     self.addMsg("Unable to remove file %s: %s" %
                                 (fileObj.fileName, info))
 
-    #----------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     # Create a full output file name
-    #----------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     def makeOutFileName(self, outPath, testMode):
         """
         Create an absolute path name for an output file in zip or
@@ -696,14 +693,14 @@ SweepSpec: "%s"
         # Sanity check
         if not outFile:
             fatalError(
-              "Too many output files with base name '%s', in SweepSpec '%s'" %
-                        (outBase, self.specName))
+                f"Too many output files with base name {outBase!r}, "
+                f"in SweepSpec {self.specName!r}")
 
         self.outFile = outFile
 
-    #----------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     # Remove out of date Media recordings
-    #----------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     def expireMeetingRecordings(self, testMode):
         """
         This is a "Custom" routine that sweeps away MP3 format meeting
@@ -715,8 +712,7 @@ SweepSpec: "%s"
                 True  = Don't actually delete any blobs, just report
                 False = Update docs and delete blobs.
         """
-        cursor  = None
-        session = None
+        cursor = session = None
 
         # Need a connection to the CDR Server
         session = cdr.login('FileSweeper', cdr.getpw('FileSweeper'))
@@ -729,7 +725,7 @@ SweepSpec: "%s"
         try:
             conn = db.connect()
             cursor = conn.cursor()
-        except Exception as e:
+        except Exception:
             FS_LOGGER.exception("attempting DB connect")
 
             # But continue with the sweep
@@ -740,7 +736,7 @@ SweepSpec: "%s"
         try:
             cursor.execute("SELECT GETDATE()")
             now = cursor.fetchone()[0]
-        except Exception as e:
+        except Exception:
             FS_LOGGER.exception("getting DB date")
             cleanSession(cursor, session)
             return
@@ -756,7 +752,7 @@ SweepSpec: "%s"
         #  the meeting recording from before that date.
         # The Media doc must also be found in one of the ...blob_usage tables.
         #  If not, then any blob associated with it has already been deleted.
-        isoFmt    = "%Y-%m-%d"
+        isoFmt = "%Y-%m-%d"
         earlyDate = \
             datetime.datetime.fromtimestamp(self.oldSpec).strftime(isoFmt)
 
@@ -788,7 +784,7 @@ SweepSpec: "%s"
         try:
             cursor.execute(qry)
             rows = cursor.fetchall()
-        except Exception as e:
+        except Exception:
             FS_LOGGER.exception("attempting to locate old blobs")
             cleanSession(cursor, session)
             return
@@ -804,13 +800,13 @@ SweepSpec: "%s"
         if testMode:
             checkOut = 'N'
 
-        #-------------------------------------------------------------------
+        # ------------------------------------------------------------------
         # We've got some to delete.
         # For each Media document:
         #  Send a transaction to the CDR Server to do the following:
         #   Add a ProcessingStatus to the Media document to say what happened
         #   Delete all of the blobs.
-        #-------------------------------------------------------------------
+        # ------------------------------------------------------------------
         for row in rows:
 
             docId, title = row
@@ -820,7 +816,7 @@ SweepSpec: "%s"
             try:
                 docObj = cdr.getDoc(session, docId, checkout=checkOut,
                                     getObject=True)
-            except Exception as e:
+            except Exception:
                 FS_LOGGER.exception("attempting to fetch doc %d", docId)
                 cleanSession(cursor, session)
                 return
@@ -831,7 +827,6 @@ SweepSpec: "%s"
                 message = "Failed getDoc for CDR ID %s: %s, continuing"
                 FS_LOGGER.error(message, docId, err)
                 continue
-
 
             # Parse the xml preparatory to modifying it
             mediaRoot = et.fromstring(docObj.xml)
@@ -858,22 +853,25 @@ SweepSpec: "%s"
                 #  Wrapped in CdrDoc wrapper
                 #  With command to delete all blobs
                 actionMsg = 'deleted'
-                saveXml  = cdr.makeCdrDoc(newXml, 'Media', docObj.id)
-                response = cdr.repDoc(session, doc=saveXml,
-                            comment='Removed meeting recording blobs',
-                                      delAllBlobVersions=True, check_in=True)
+                opts = dict(
+                    doc=cdr.makeCdrDoc(newXml, 'Media', docObj.id),
+                    comment='Removed meeting recording blobs',
+                    delAllBlobVersions=True,
+                    check_in=True,
+                )
+                response = cdr.repDoc(session, **opts)
 
                 # Check response
                 if not response[0]:
-                     errors = cdr.getErrors(response[1], errorsExpected=True,
-                                            asSequence=False)
-                     message = "Saving Media xml for doc %s: %s"
-                     FS_LOGGER.error(message, docObj.id, errors)
-                     FS_LOGGER.info("Aborting expireMeetingRecords()")
+                    errors = cdr.getErrors(response[1], errorsExpected=True,
+                                           asSequence=False)
+                    message = "Saving Media xml for doc %s: %s"
+                    FS_LOGGER.error(message, docObj.id, errors)
+                    FS_LOGGER.info("Aborting expireMeetingRecords()")
 
-                     # Stop doing this, but continue rest of file sweeps.
-                     cleanSession(cursor, session)
-                     return
+                    # Stop doing this, but continue rest of file sweeps.
+                    cleanSession(cursor, session)
+                    return
 
             # Log results for this media recording
             args = actionMsg, docId, title
@@ -883,9 +881,9 @@ SweepSpec: "%s"
         # Cleanup
         cleanSession(cursor, session)
 
-    #----------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     # Report results via HTML
-    #----------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     def reportHTML(self):
         """
         Construct HTML to summarize what happened with this SweepSpec
@@ -893,15 +891,14 @@ SweepSpec: "%s"
         Return:
             HTML string
         """
-        html = """
-<h3>%s</h3>
-<table width='80%%' align='center' border='1'>
- <tr><td>Action</td><td>%s</td></tr>
- <tr><td>Num files examined</td><td>%d</td></tr>
- <tr><td>Num files processed</td><td>%d</td></tr>
- <tr><td>Num bytes processed</td><td>%d</td></tr>
-""" % (self.specName, self.action, len(self.totalList),
-       len(self.qualifiedList), self.qualifiedBytes)
+        html = f"""
+<h3>{self.specName}</h3>
+<table width='80%' align='center' border='1'>
+ <tr><td>Action</td><td>{self.action}</td></tr>
+ <tr><td>Num files examined</td><td>{len(self.totalList)}</td></tr>
+ <tr><td>Num files processed</td><td>{len(self.qualifiedList)}</td></tr>
+ <tr><td>Num bytes processed</td><td>{self.qualifiedBytes}</td></tr>
+"""
 
         # Any errors or warnings?
         if len(self.msgs) > 0:
@@ -912,9 +909,9 @@ SweepSpec: "%s"
 
         return html
 
-    #----------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     # Process a message
-    #----------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     def addMsg(self, msg):
         """
         This version appends messages to a list for this spec.
@@ -925,9 +922,10 @@ SweepSpec: "%s"
         """
         self.msgs.append(msg)
 
-#----------------------------------------------------------------------
+
+# ---------------------------------------------------------------------
 # Load configuration file
-#----------------------------------------------------------------------
+# ---------------------------------------------------------------------
 def loadConfigFile(fileName):
     """
     Load the configuration file.
@@ -983,7 +981,7 @@ def loadConfigFile(fileName):
                 dom = xml.dom.minidom.parseString(row[0].encode("utf-8"))
                 msg = "loaded config from CDR%d version %d"
                 FS_LOGGER.info(msg, *args)
-            except Exception as e:
+            except Exception:
                 msg = "Failure parsing config document CDR%d version %d"
                 FS_LOGGER.exception(msg, *args)
 
@@ -1005,22 +1003,25 @@ def loadConfigFile(fileName):
 
     return spec
 
-#----------------------------------------------------------------------
+
+# ---------------------------------------------------------------------
 # Normalize a path
-#----------------------------------------------------------------------
+# ---------------------------------------------------------------------
 def normPath(path):
     return re.sub(r"\\", r"/", path)
 
-#----------------------------------------------------------------------
+
+# ---------------------------------------------------------------------
 # Normalize a time value in seconds to the nearest previous midnight
 # Converts UTC to local time and makes the change
-#----------------------------------------------------------------------
+# ---------------------------------------------------------------------
 def normTime(timeVal):
     return (timeVal - (timeVal % DAY_SECS) + time.altzone - DAY_SECS)
 
-#----------------------------------------------------------------------
+
+# ---------------------------------------------------------------------
 # Make a filename unique by adding a suffix if needed
-#----------------------------------------------------------------------
+# ---------------------------------------------------------------------
 def makeFileNameUnique(inFile, maxSuffix=1):
     """
     Check if an input absolute or relative file name is unique.
@@ -1048,20 +1049,21 @@ def makeFileNameUnique(inFile, maxSuffix=1):
     fileNum = 1
     outFile = inFile
     while os.path.exists(outFile):
-        outFile = inFile +".%02d" % fileNum
+        outFile = f"{inFile}.{fileNum:02d}"
         fileNum += 1
 
     # Did we get to a surprising number of files with the same name
     if fileNum > maxSuffix:
         # If they're test files, it's okay, otherwise let's complain
-        if outFile.find('.TEST') < 0:
+        if ".TEST" not in outFile:
             return None
 
     return outFile
 
-#----------------------------------------------------------------------
+
+# ---------------------------------------------------------------------
 # Cleanup CdrServer and database connections
-#----------------------------------------------------------------------
+# ---------------------------------------------------------------------
 def cleanSession(cursor, session):
     """
     If there is a session or cursor open, close it appropriately.  If
@@ -1074,18 +1076,19 @@ def cleanSession(cursor, session):
     if cursor:
         try:
             cursor.close()
-        except Exception as e:
+        except Exception:
             FS_LOGGER.exception("failure closing db cursor")
 
     if session:
         try:
             cdr.logout(session)
-        except Exception as e:
+        except Exception:
             FS_LOGGER.exception("failure logging out of session")
 
-#----------------------------------------------------------------------
+
+# ---------------------------------------------------------------------
 # Fatal error
-#----------------------------------------------------------------------
+# ---------------------------------------------------------------------
 def fatalError(msg):
     """
     Log and display error message.
@@ -1097,7 +1100,7 @@ def fatalError(msg):
     global recips, TIER
 
     # Add message to log file
-    msg = "FATAL error: %s\n" %msg
+    msg = f"FATAL error: {msg}\n"
     FS_LOGGER.error(msg)
 
     # Send mail to recipients from command line or registered group
@@ -1105,8 +1108,8 @@ def fatalError(msg):
     if not recips:
         try:
             group = "FileSweeper Error Notification"
-            recips = CDRTask.get_group_email_addresses(group)
-        except Exception as e:
+            recips = Job.get_group_email_addresses(group)
+        except Exception:
             FS_LOGGER.exception("Getting email recipients from the CDR")
 
     # Message subject
@@ -1127,7 +1130,7 @@ Error message was:
             opts = dict(subject=subject, body=errorBody)
             cdr.EmailMessage(sender, recips, **opts).send()
             mailSent = True
-        except Exception as e:
+        except Exception:
             FS_LOGGER.exception("Attempting to send mail for fatal error")
 
     if mailSent:
@@ -1138,12 +1141,12 @@ Error message was:
     raise Exception(errorBody)
 
 
-#----------------------------------------------------------------------
+# ---------------------------------------------------------------------
 # Beginning of common logic.  This script actually has two entry points,
 # one at the bottom of the file (__name__ == '__main_' ) allowing the
 # script to be run from the command line, and another via the FileSweeper
 # task class.
-#----------------------------------------------------------------------
+# ---------------------------------------------------------------------
 def sweepFiles(passedConfigFile, passedTestMode=False, passedRecips=None,
                passedOutputDir=""):
 
@@ -1204,7 +1207,7 @@ remove the file "%s" to enable FileSweeper to run.
                   % (outputDir, info))
         if not os.path.isdir(outputDir):
             fatalError('Command line output name "%s" is not a directory'
-                        % outputDir)
+                       % outputDir)
 
         # DEBUG
         # fatalError("Aborting for test")
@@ -1252,7 +1255,7 @@ remove the file "%s" to enable FileSweeper to run.
                                 os.makedirs(fileBase)
                             except Exception as info:
                                 fatalError('Error creating directory "%s": %s'
-                                            % (fileBase, info))
+                                           % (fileBase, info))
                         if not os.path.isdir(fileBase):
                             msg = 'Config output name "{}" is not a directory'
                             fatalError(msg.format(fileBase))
@@ -1268,10 +1271,10 @@ remove the file "%s" to enable FileSweeper to run.
                     # Back to where we started
                     try:
                         os.chdir(cwd)
-                    except Exception as info:
-                        fatalError(
-         """SweepSpec "%s" could not return to directory "%s" - can't happen"""
-                            % (spec.specName, cwd))
+                    except Exception:
+                        fatalError(f'SweepSpec "{spec.specName}" could '
+                                   f'not return to directory "cwd"'
+                                   " - can't happen")
 
                 # Report results to log file
                 FS_LOGGER.info(str(spec))
@@ -1294,9 +1297,10 @@ remove the file "%s" to enable FileSweeper to run.
         if needToReleaseLockFile:
             cdr.removeLockFile(lockFileName)
 
-#----------------------------------------------------------------------
+
+# ---------------------------------------------------------------------
 #                           MAIN
-#----------------------------------------------------------------------
+# ---------------------------------------------------------------------
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()

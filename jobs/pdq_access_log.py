@@ -94,6 +94,7 @@ class Report(Job):
             return self._orgs
         url = "https://cdr.cancer.gov/cgi-bin/cdr/get-pdq-partners.py?p=CDR"
         self.logger.info("fetching partners from %r", url)
+
         class Org:
             def __init__(self, node):
                 self.oid = int(node.get("oid"))
@@ -284,8 +285,8 @@ class Report(Job):
                 sheet.cell(row=row, column=2, value=r.org)
                 sheet.cell(row=row, column=3, value=r.path)
                 sheet.cell(row=row, column=4, value=r.sid)
-                sheet.cell(row=row, column=5, value=r.date).alignment=center
-                sheet.cell(row=row, column=6, value=r.time).alignment=center
+                sheet.cell(row=row, column=5, value=r.date).alignment = center
+                sheet.cell(row=row, column=6, value=r.time).alignment = center
                 row += 1
         book.save(self.report_path)
         self.logger.info("wrote %r", self.report_path)
@@ -305,7 +306,8 @@ class Report(Job):
             "         %s\n" % self.log_path,
             "Please save the attached report to the network directory",
             "         L:\\OCPL\\_CROSS\\CDR\\Reports\\FTP Stats",
-            "so the Clinical Trials team can access the information as needed.",
+            "so the Clinical Trials team can access the information "
+            "as needed.",
             "",
             "For questions or comments please reply to this email message."
         )
@@ -339,8 +341,7 @@ class Report(Job):
             if yyyymm:
                 match = re.match(r"(\d\d\d\d)(\d\d)", yyyymm)
                 if not match:
-                    self.logger.error("malformed month %r", month)
-                    raise Exception("invalid parameter")
+                    raise Exception("expected YYYYMM, got %r", yyyymm)
                 self.year = int(match.group(1))
                 self.month = int(match.group(2))
                 self.start = datetime.date(self.year, self.month, 1)
@@ -379,6 +380,7 @@ class Report(Job):
             """
 
             return self.start.strftime("%B %Y")
+
 
 if __name__ == "__main__":
     """

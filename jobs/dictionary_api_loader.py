@@ -139,7 +139,9 @@ class DrugLoader(DictionaryAPILoader):
 if __name__ == "__main__":
     """Support testing from the command line."""
 
-    import argparse, json, sys
+    import argparse
+    import json
+    import sys
     parser = argparse.ArgumentParser()
     choices = "drugs", "glossary"
     parser.add_argument("--dictionary", "-d", choices=choices, required=True)

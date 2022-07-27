@@ -3,7 +3,7 @@
 
 from argparse import ArgumentParser
 from datetime import datetime
-from json import dump, dumps, loads
+from json import dump, dumps, loads, load
 from re import compile
 from sys import stderr
 from time import sleep
@@ -20,6 +20,7 @@ class Loader(Job):
 
     Options:
       * auth (optional comma-separated username and password)
+      * concepts (locally cached dump of listing info records)
       * debug (increase level of logging)
       * host (override ElasticSearch host name)
       * limit (throttle the number of concepts for testing)
@@ -30,7 +31,7 @@ class Loader(Job):
       * groups (locally cached dump of listing info records)
     """
 
-    URL = "https://evsrestapi.nci.nih.gov/evsrestapi/api/v1/ctrp/concept/{}"
+    API = "https://api-evsrest.nci.nih.gov/api/v1/concept/ncit"
     BAD = {"C138195", "C131913"}
     DISEASE = "C7057"
     INTERVENTION = "C1908"
@@ -50,8 +51,10 @@ class Loader(Job):
     MIN_SLEEP = .01
     MAX_SLEEP = 500
     MAX_PRETTY_URL_LENGTH = 75
+    BATCH_SIZE = 500
     SUPPORTED_PARAMETERS = {
         "auth",
+        "concepts",
         "debug",
         "dump",
         "groups",
@@ -149,13 +152,29 @@ class Loader(Job):
 
             groups = dict()
             start = datetime.now()
-            for code in self.TOP:
-                self.__fetch(code)
-            args = len(self.concepts), datetime.now() - start
+            concepts = self.opts.get("concepts")
+            if concepts:
+                class CachedConcept:
+                    def __init__(self, code, name):
+                        self.code = code
+                        self.name = name
+                        self.key = name.lower()
+                with open(concepts) as fp:
+                    concepts = [CachedConcept(*values) for values in load(fp)]
+            else:
+                self.__fetch(self.TOP)
+                concepts = self.concepts.values()
+                if self.dump:
+                    values = [(c.code, c.name) for c in concepts]
+                    values = [(int(v[0][1:]), v[0], v[1]) for v in values]
+                    values = [v[1:] for v in sorted(values)]
+                    with open(f"concepts-{self.stamp}.json", "w") as fp:
+                        dump(values, fp, indent=2)
+            args = len(concepts), datetime.now() - start
             self.logger.info("fetched %d concepts in %s", *args)
             if self.verbose:
                 stderr.write("\n")
-            for concept in self.concepts.values():
+            for concept in concepts:
                 if concept.code in self.BAD:
                     continue
                 group = groups.get(concept.key)
@@ -301,7 +320,7 @@ class Loader(Job):
                 raise Exception("no database port specified")
             try:
                 self._port = int(port)
-            except:
+            except Exception:
                 raise Exception("invalid port value")
             if self.verbose:
                 stderr.write(f"connecting on port {self._port}\n")
@@ -397,8 +416,10 @@ class Loader(Job):
                 fp.write(f"{action}\n")
                 fp.write(f"{dumps(label)}\n")
 
-    def __fetch(self, code):
+    def __fetch(self, codes):
         """Fetch a concept and its children recursively.
+
+        Populates the `concepts` property as a side effect.
 
         We attempt repeatedly to fetch the concept until we succeed
         or run out of patience and conclude that the EVS is ailing.
@@ -407,33 +428,48 @@ class Loader(Job):
         the EVS will be able to keep up. :-)
 
         Pass:
-            code - string for the unique concept ID in the EVS
+            codes - sequence of strings for the unique concept IDs in the EVS
         """
 
-        if code not in self.concepts and len(self.concepts) < self.limit:
-            seconds = self.MIN_SLEEP
-            while code not in self.concepts:
-                sleep(seconds)
-                url = self.URL.format(code)
-                try:
-                    response = get(url, timeout=5)
-                    values = response.json()
-                    self.concepts[code] = Concept(values)
-                    if self.verbose:
-                        n = len(self.concepts)
-                        stderr.write(f"\rfetched {n} concepts")
-                    self.logger.debug("fetched %s", code)
+        seconds = self.MIN_SLEEP
+        url = f"{self.API}?include=full&list={','.join(codes)}"
+        while True:
+            sleep(seconds)
+            try:
+                response = get(url, timeout=5)
+                concepts = response.json()
+                break
+            except Exception:
+                self.logger.exception(url)
+                seconds *= 2
+                if seconds > self.max_sleep:
+                    self.logger.error("EVS has died -- bailing")
+                    raise Exception("EVS has died")
+        if len(codes) != len(concepts):
+            self.logger.warning("got %d concepts for %r", len(concepts), codes)
+            self.logger.warning(response.text)
+        for values in concepts:
+            concept = Concept(values)
+            self.concepts[concept.code] = concept
+            if self.verbose:
+                stderr.write(f"\rfetched {len(self.concepts)} concepts")
+            self.logger.debug("fetched %s", concept.code)
+        children = set()
+        for values in concepts:
+            if len(self.concepts) >= self.limit:
+                break
+            for child in values.get("children", []):
+                if len(self.concepts) + len(children) >= self.limit:
                     break
-                except Exception:
-                    self.logger.exception(url)
-                    seconds *= 2
-                    if seconds > self.max_sleep:
-                        self.logger.error("EVS has died -- bailing")
-                        raise Exception("EVS has died")
-            for subconcept in values.get("subconcepts", []):
-                code = subconcept.get("code", "").upper().strip()
-                if code:
-                    self.__fetch(code)
+                code = child.get("code", "").upper()
+                if code and code not in self.concepts:
+                    children.add(code)
+        if children:
+            i = 0
+            children = list(children)
+            while i < len(children):
+                self.__fetch(children[i:i+self.BATCH_SIZE])
+                i += self.BATCH_SIZE
 
     def __index(self, groups, labels):
         """Create ElasticSearch indexes, load them, and alias them.
@@ -454,7 +490,7 @@ class Loader(Job):
         self.es.indices.create(index=trial_index, body=self.trial_def)
         if self.verbose:
             stderr.write("indexes created\n")
-        opts = dict(index=info_index) #, doc_type=self.INFO)
+        opts = dict(index=info_index)
         if self.verbose:
             done = 0
         for group in groups:
@@ -462,7 +498,7 @@ class Loader(Job):
             opts["body"] = group
             try:
                 self.es.index(**opts)
-            except Exception as e:
+            except Exception:
                 stderr.write(f"\n{group}\n")
                 raise
             if self.verbose:
@@ -471,13 +507,13 @@ class Loader(Job):
         if self.verbose:
             stderr.write(f"\n{info_index} populated\n")
             done = 0
-        opts = dict(index=trial_index) #, doc_type=self.TRIAL)
+        opts = dict(index=trial_index)
         for label in labels:
             self.logger.debug("indexing label %s", label["id_string"])
             opts["body"] = label
             try:
                 self.es.index(**opts)
-            except Exception as e:
+            except Exception:
                 stderr.write(f"\n{label}\n")
                 raise
             if self.verbose:
@@ -545,6 +581,7 @@ class Concept:
     """Values for a single concept in the EVS."""
 
     SPACES = compile(r"\s+")
+    NONE = "[NO DISPLAY NAME]"
 
     def __init__(self, values):
         """Pull out the pieces we need and discard the rest.
@@ -553,19 +590,25 @@ class Concept:
             values - dictionary of concept values pulled from EVS JSON
         """
 
-        name = None
-        for synonym in values.get("synonyms", []):
-            if synonym.get("termSource") == "CTRP":
+        display_name = preferred_name = ctrp_name = None
+        try:
+            synonyms = values.get("synonyms", [])
+        except Exception as e:
+            stderr.write(f"\n{values}: {e}")
+            exit(1)
+        for synonym in synonyms:
+            if synonym.get("source") == "CTRP":
                 if synonym.get("termGroup") == "DN":
-                    name = (synonym.get("termName") or "").strip()
-                    if name:
+                    ctrp_name = (synonym.get("name") or "").strip()
+                    if ctrp_name:
                         break
-        if not name:
-            name = (values.get("displayName") or "").strip()
-        if not name:
-            name = (values.get("preferredName") or "").strip()
-        if not name:
-            name = "[NO DISPLAY NAME]"
+            else:
+                name_type = synonym.get("type")
+                if name_type == "Preferred_Name":
+                    preferred_name = (synonym.get("name") or "").strip()
+                elif name_type == "Display_Name":
+                    display_name = (synonym.get("name") or "").strip()
+        name = ctrp_name or display_name or preferred_name or self.NONE
         self.name = self.SPACES.sub(" ", name)
         self.key = self.name.lower()
         self.code = values["code"].upper()
@@ -579,36 +622,6 @@ class Group:
     _STRIP = "\",+().\xaa'\u2019[\uff1a:*\\]"
     TRANS = str.maketrans(_FROM, _TO, _STRIP)
     NON_DIGITS = compile("[^0-9]+")
-    PRESERVE = {
-        "I",
-        "IA",
-        "IB",
-        "IC",
-        "IA1",
-        "IA2",
-        "IB1",
-        "IB2",
-        "II",
-        "IIA",
-        "IIB",
-        "III",
-        "IIIA",
-        "IIIB",
-        "IIIC",
-        "IV",
-        "IVA",
-        "IVB",
-        "IVC",
-        "IIB",
-        "Kaposi",
-        "Hodgkin",
-        "Sézary",
-        "Ewing",
-        "Langerhans",
-        "Merkel",
-        "Wilms",
-        "Burkitt",
-    }
 
     def __init__(self, loader, concept):
         """Pull what we need from the caller's Concept object.
@@ -654,7 +667,7 @@ class Group:
             for code in self.codes:
                 codes.append(int(self.NON_DIGITS.sub("", code)))
             self._values = dict(
-                concept_id = [f"C{code:d}" for code in sorted(codes)],
+                concept_id=[f"C{code:d}" for code in sorted(codes)],
                 name=dict(
                     label=self.name,
                     normalized=self.phrase,
@@ -709,6 +722,7 @@ if __name__ == "__main__":
                         help="show progress on the command line")
     parser.add_argument("--groups", "-g",
                         help="dump file name for listing info records")
+    parser.add_argument("--concepts", "-c", help="dump of concept values")
     parser.add_argument("--auth", "-a",
                         help="comma-separated username/password")
     opts = parser.parse_args()

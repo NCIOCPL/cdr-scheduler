@@ -127,7 +127,7 @@ class Loader(Job):
                 tempname = f"d:/tmp/sitemap-{stamp}.xml"
                 with open(tempname, "wb") as fp:
                     fp.write(xml)
-            except Exception as e:
+            except Exception:
                 self.logger.exception("saving sitemap")
                 raise
             try:
@@ -138,7 +138,7 @@ class Loader(Job):
                     unlink(tempname)
                 else:
                     self.logger.info("preserving %s", tempname)
-            except Exception as e:
+            except Exception:
                 self.logger.exception("sending %s", tempname)
                 raise
 

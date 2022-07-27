@@ -156,7 +156,7 @@ class Control:
                 try:
                     job = self.Job(self, row)
                     job.register()
-                except Exception as e:
+                except Exception:
                     self.logger.exception("malformed job %s", tuple(row))
         elapsed = datetime.now() - start
         self.logger.info("registered %d jobs in %s", len(self.jobs), elapsed)
@@ -181,7 +181,7 @@ class Control:
                     job = self.Job(self, row)
                     found.add(job.id)
                     job.register()
-                except Exception as e:
+                except Exception:
                     self.logger.exception("malformed job %s", tuple(row))
         for id in set(self.jobs) - found:
             job = self.jobs[id]
@@ -190,7 +190,6 @@ class Control:
             del self.jobs[id]
         elapsed = datetime.now() - start
         self.logger.debug("jobs refreshed in %s", elapsed)
-
 
     class Job:
         """Settings from the database table for this job.

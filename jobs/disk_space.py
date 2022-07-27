@@ -18,7 +18,6 @@ D DRIVE
 """
 
 import argparse
-import re
 import requests
 import cdr
 from .base_job import Job
@@ -98,6 +97,7 @@ class Monitor(Job):
 
     class Server:
         BASE = "https://cdr{}.cancer.gov/cgi-bin/cdr/df.py"
+
         def __init__(self, tier):
             self.name = tier
             self.free = {}
@@ -111,6 +111,7 @@ class Monitor(Job):
                     drive = line[0]
                 elif "FREE" in line:
                     self.free[drive] = self.Free(line)
+
         class Free:
             def __init__(self, line):
                 tokens = line.strip().split()

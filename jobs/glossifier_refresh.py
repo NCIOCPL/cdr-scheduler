@@ -58,7 +58,7 @@ class Terms:
     SERVER = socket.gethostname().split(".")[0]
     SENDER = "cdr@{}.nci.nih.gov".format(SERVER.lower())
     SUBJECT = "DUPLICATE GLOSSARY TERM NAME MAPPINGS ON " + SERVER.upper()
-    UNREPORTED = set() # see OCECDR-4795 set(["tpa", "cab", "ctx", "receptor"])
+    UNREPORTED = set()  # OCECDR-4795 set(["tpa", "cab", "ctx", "receptor"])
     GROUP = "glossary-servers"
 
     def __init__(self, logger=None, recip=None):
@@ -131,8 +131,8 @@ class Terms:
                 lines.append("Server {!r} at {}: {}".format(*args))
             body = "\n".join(lines)
             opts = dict(subject=subject, body=body)
-            message = cdr.EmailMessage(self.SENDER, recips, **opts)
-            self.logger.error("send failure notice sent to %r", recips)
+            cdr.EmailMessage(self.SENDER, recips, **opts)
+            self.logger.error("sent failure notice sent to %r", recips)
 
     @property
     def auth(self):
@@ -176,7 +176,8 @@ class Terms:
                 query = db.Query("query_term_pub", "doc_id", "value")
                 query.where(query.Condition("path", path))
                 rows = query.execute(self.cursor).fetchall()
-                self.logger.debug("fetched %d %s dictionaries", len(rows), lang)
+                args = len(rows), lang
+                self.logger.debug("fetched %d %s dictionaries", *args)
                 for doc_id, dictionary in rows:
                     concept = self._concepts.get(doc_id)
                     if not concept:
@@ -405,7 +406,7 @@ class Term:
         self.terms = terms
         self.id = term_id
         self.concept = concept
-        self.names = { "en": [], "es": [] }
+        self.names = {"en": [], "es": []}
         root = etree.fromstring(doc_xml.encode("utf-8"))
         if cdr.get_text(root.find("TermNameStatus")) != "Rejected":
             for node in root.findall("TermName"):
@@ -445,7 +446,6 @@ class Term:
             usages[key] = set([self.id])
         else:
             usages[key].add(self.id)
-
 
     class Name:
         """
