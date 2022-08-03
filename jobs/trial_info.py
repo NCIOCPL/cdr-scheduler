@@ -1,4 +1,7 @@
 """Load clinical trial info into ElasticSearch.
+
+For details on the requirements for this loader, please refer to
+https://github.com/NCIOCPL/clinical-trials-listing-api/issues/2.
 """
 
 from argparse import ArgumentParser
