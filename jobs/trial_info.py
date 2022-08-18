@@ -1,4 +1,7 @@
 """Load clinical trial info into ElasticSearch.
+
+For details on the requirements for this loader, please refer to
+https://github.com/NCIOCPL/clinical-trials-listing-api/issues/2.
 """
 
 from argparse import ArgumentParser
@@ -198,6 +201,9 @@ class Loader(Job):
                 if len(matches) > 1:
                     matches = " and ".join(matches)
                     error = f"group {group.key} matches overrides {matches}"
+                    if self.verbose:
+                        msg = f"\noffending group has codes {group.codes!r}\n"
+                        stderr.write(msg)
                     raise Exception(error)
                 if matches:
                     key, override = matches.popitem()
@@ -598,7 +604,7 @@ class Concept:
             exit(1)
         for synonym in synonyms:
             if synonym.get("source") == "CTRP":
-                if synonym.get("termGroup") == "DN":
+                if synonym.get("termType") == "DN":
                     ctrp_name = (synonym.get("name") or "").strip()
                     if ctrp_name:
                         break
@@ -715,7 +721,7 @@ if __name__ == "__main__":
     parser.add_argument("--sleep", type=int, metavar="SECONDS",
                         help="longest delay between fetch failures")
     parser.add_argument("--port", type=int,
-                        help="ElasticSearch port (default 9400)")
+                        help="ElasticSearch port (default 9200)")
     parser.add_argument("--test", action="store_true",
                         help="save to file system, not ElasticSearch")
     parser.add_argument("--verbose", "-v", action="store_true",
