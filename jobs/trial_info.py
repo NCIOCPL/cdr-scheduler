@@ -14,7 +14,7 @@ from unicodedata import combining, normalize
 from elasticsearch7 import Elasticsearch
 from requests import get
 from .base_job import Job
-from cdr import getControlValue
+from cdr import getControlValue, EmailMessage
 from cdrapi.settings import Tier
 
 
@@ -80,21 +80,25 @@ class Loader(Job):
         mappings of some of the labels.
         """
 
-        if self.opts.get("debug"):
-            self.logger.setLevel("DEBUG")
-        groups = self.groups
-        labels = [label for label in self.labels]
-        if self.dump:
-            self.__dump(groups, labels)
-        if self.testing:
-            with open(f"{self.INFO}-{self.stamp}.json", "w") as fp:
-                dump({self.INFO: groups}, fp, indent=2)
-            with open(f"{self.TRIAL}-{self.stamp}.json", "w") as fp:
-                dump({self.TRIAL: labels}, fp, indent=2)
-        else:
-            self.__index(groups, labels)
-        if self.verbose:
-            stderr.write("done\n")
+        try:
+            if self.opts.get("debug"):
+                self.logger.setLevel("DEBUG")
+            groups = self.groups
+            labels = [label for label in self.labels]
+            if self.dump:
+                self.__dump(groups, labels)
+            if self.testing:
+                with open(f"{self.INFO}-{self.stamp}.json", "w") as fp:
+                    dump({self.INFO: groups}, fp, indent=2)
+                with open(f"{self.TRIAL}-{self.stamp}.json", "w") as fp:
+                    dump({self.TRIAL: labels}, fp, indent=2)
+            else:
+                self.__index(groups, labels)
+            if self.verbose:
+                stderr.write("done\n")
+        except Exception as e:
+            self.logger.exception("failure")
+            self.__alert(e)
 
     @property
     def auth(self):
@@ -382,6 +386,23 @@ class Loader(Job):
             self._verbose = True if self.opts.get("verbose") else False
         return self._verbose
 
+    def __alert(self, e):
+        """Send out email notification on failure.
+
+        Pass:
+            e - Exception caught during processing
+        """
+
+        recips = self.get_group_email_addresses()
+        sender = self.SENDER
+        subject = f"[{self.tier}] Dynamic listing pages loader failure"
+        body = f"Failure running loader: {e}"
+        try:
+            message = EmailMessage(sender, recips, subject=subject, body=body)
+            message.send()
+        except Exception:
+            self.logger.exception("failure sending to %r", recips)
+
     def __create_alias(self, index, alias):
         """Point the canonical name for the records to our new index."""
 
@@ -601,7 +622,7 @@ class Concept:
             synonyms = values.get("synonyms", [])
         except Exception as e:
             stderr.write(f"\n{values}: {e}")
-            exit(1)
+            raise
         for synonym in synonyms:
             if synonym.get("source") == "CTRP":
                 if synonym.get("termType") == "DN":
