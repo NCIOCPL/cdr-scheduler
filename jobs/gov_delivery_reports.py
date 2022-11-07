@@ -264,11 +264,6 @@ class Control:
                     "english": "GovDelivery EN Docs Notification",
                 }.get(self.key)
                 recips = Job.get_group_email_addresses(group)
-        recips = [
-            "bkline@rksystems.com",
-            "bkline@nih.gov",
-            "robin.juthe@nih.gov",
-        ]
         if recips:
             subject = f"[{self.tier.name}] {self.title}"
             opts = dict(subject=subject, body=report, subtype="html")
