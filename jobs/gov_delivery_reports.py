@@ -54,8 +54,6 @@ class Control:
     Class constants:
 
     TITLES          Map of report key to distinguishing part of report title.
-    DEFAULT_START   Fall back on this for beginning of date range for report.
-    DEFAULT_END     Fall back on this for end of date range.
     REPORTS         Full set of reports to be run by default (in order).
     SENDER          First argument to EmailMessage constructor.
     CHARSET         Used in HTML page.
@@ -84,8 +82,6 @@ class Control:
         "english": "New/Changed English Summaries",
         "spanish": "New/Changed Spanish Summaries",
     }
-    DEFAULT_START = date.today() - timedelta(7)
-    DEFAULT_END = date.today() - timedelta(1)
     REPORTS = ["english", "spanish"]
     SENDER = "PDQ Operator <NCIPDQoperator@mail.nih.gov>"
     CHARSET = "utf-8"
@@ -136,13 +132,15 @@ class Control:
             overrides the default of this server's local tier
         """
 
+        default_start = date.today() - timedelta(7)
+        default_end = date.today() - timedelta(1)
         self.logger = logger
         self.logger.info("====================================")
         self.reports = options.get("reports") or self.REPORTS
         self.mode = options["mode"]
         self.skip_email = options.get("skip-email", False)
-        self.start = options.get("start") or str(self.DEFAULT_START)
-        self.end = options.get("end") or str(self.DEFAULT_END)
+        self.start = options.get("start") or str(default_start)
+        self.end = options.get("end") or str(default_end)
         self.test = self.mode == "test"
         self.tier = Tier(options.get("tier"))
         self.recip = options.get("recip")
