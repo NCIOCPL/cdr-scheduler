@@ -11,6 +11,8 @@ from functools import cache, cached_property
 from json import loads
 from .base_job import Job
 
+import sys
+
 
 class ReportTask(Job):
     """
@@ -69,6 +71,7 @@ class Control:
     skip_email      If true, don't send report to recipients; just save it.
     start           Beginning of date range for selecting documents for report.
     end             End of date range for selecting documents for report.
+    export_start    Date/time when export job starts. Will be used as default start
     recip           Override for who should get the report.
     test            Convenience Boolean reflecting whether mode is 'test'.
     logger          Object for recording log information about the report.
@@ -117,10 +120,12 @@ class Control:
             "info", "debug", or "error"; defaults to "info"
 
         start
-            overrides the default start of the date range (a week ago)
+            overrides the default start of the date range (start of second
+            to last weekly publishing job)
 
         end
-            overrides the default end of the date range (today)
+            overrides the default end of the date range (start of last
+            weekly publishing job)
 
         recip
             optional email address for testing so we don't spam others
@@ -132,26 +137,54 @@ class Control:
             overrides the default of this server's local tier
         """
 
-        default_start = date.today() - timedelta(7)
-        default_end = date.today() - timedelta(1)
+        # The default start/end used to be the week before today but has
+        # changed to use the period between the last two weekly publishing
+        # jobs
+        #
+        # default_start = date.today() - timedelta(7)
+        # default_end = date.today() - timedelta(1)
         self.logger = logger
-        self.logger.info("====================================")
+        self.logger.info("=" * 40)
         self.reports = options.get("reports") or self.REPORTS
         self.mode = options["mode"]
         self.skip_email = options.get("skip-email", False)
-        self.start = options.get("start") or str(default_start)
-        self.end = options.get("end") or str(default_end)
         self.test = self.mode == "test"
         self.tier = Tier(options.get("tier"))
         self.recip = options.get("recip")
         timeout = int(options.get("timeout", 300))
         opts = dict(user="CdrGuest", timeout=timeout, tier=self.tier.name)
         self.cursor = db.connect(**opts).cursor()
+
+        # The report covers by default a full week and displays documents
+        # published between the last weekly publishing job and the one
+        # before that. This job used to run on a Sunday and include documents
+        # for the week before that (Sunday through Saturday).  The publishing
+        # job typically runs at 16:00h on Friday.  A document that is made
+        # publishable after the Friday job started but before this report
+        # starts on Sunday will incorrectly include such a document (assuming a
+        # publishable version hasn't also been created during the specified
+        # date range).  Therefore, in order to exclude such outliers,
+        # we need to run the report from the previous-Friday-job through the
+        # last Friday job. That start time is captured in self.export_start
+
+        # Unless a date is specified the default date range covers the dates
+        # between the last two successful 'Export' jobs.
+        # ---------------------------------------------------------------------
+        self.export_start, self.export_end = self.get_export_start_times()
+        self.start = options.get("start") or str(self.export_start)
+        self.end = options.get("end") or str(self.export_end)
+
+        ##### For Testing #####
+        # self.start = "2022-10-30"
+        # self.end = "2022-11-05"
+        ##### For Testing #####
+
         if self.skip_email:
             self.logger.info("skipping email of reports")
 
     def run(self):
         "Run each of the reports we've been asked to create."
+
         for key in self.reports:
             try:
                 self.do_report(key)
@@ -167,15 +200,23 @@ class Control:
                   See Control.REPORTS for expected values.
         """
 
-        title_args = (self.TITLES[key], self.start, self.end)
+        title_args = (self.TITLES[key], self.start.split()[0],
+                      self.end.split()[0])
         self.title = "GovDelivery %s Report (%s to %s)" % title_args
+        self.sub_title = "Date/Time: (%s to %s)" % (self.export_start,
+                                                     self.export_end)
+        self.logger.info(self.title)      ## Testing
+        self.logger.info(self.sub_title)  ## Testing
+
         self.key = key
         report = self.create_report()
         self.logger.debug("report\n%s", report)
+
         if not self.skip_email:
             self.send_report(report)
+
         self.save_report(report)
-        self.logger.info(self.title)
+
 
     def create_report(self):
         """
@@ -190,6 +231,7 @@ class Control:
         style = "font-size: .9em; font-style: italic; font-family: Arial"
         body = self.B.BODY(
             self.B.H3(self.title, style="color: navy; font-family: Arial;"),
+            self.B.P("Adjusted date range: %s" % self.sub_title, style=style),
             self.B.P("Report date: %s" % date.today(), style=style)
         )
         for audience in ("Health professionals", "Patients"):
@@ -199,6 +241,7 @@ class Control:
             body.append(self.summary_table("DrugInformationSummary", True))
             body.append(self.summary_table("DrugInformationSummary", False))
         return self.serialize(self.B.HTML(self.html_head(), body))
+
 
     def summary_table(self, doc_type, new, audience=None):
         """
@@ -221,6 +264,7 @@ class Control:
         if doc_type == "Summary":
             args["language"] = self.key.capitalize()
         return SummarySet(self, **args).table()
+
 
     def save_report(self, report):
         """
@@ -359,6 +403,42 @@ class Control:
         d = dict(defaults, **styles)
         s = [f"""{k.replace("_", "-")}:{v}""" for k, v in d.items()]
         return ";".join(s)
+
+
+    def get_export_start_times(self):
+        """
+        Get the start times of the previous 2 Export jobs. Those are the
+        immediate successful Export jobs before a successful Push job.
+        We're only interested to display documents that did get published
+        to Cancer.gov.  Therefore, we have to ensure the documents were
+        pushed and not just exported.
+        We then will identify the timestamp for the corresponding Export jobs.
+        """
+        # Select the last 2 publishing job times of a successful job
+        query = db.Query("pub_proc", "top 2 id").order("id DESC")
+        query.where("status = 'Success'")
+        query.where("pub_subset = 'Push_Documents_To_Cancer.gov_Export'")
+
+        # self.logger.info(query)
+
+        rows = query.execute(self.cursor).fetchall()
+        # self.logger.info(rows)
+
+        date_range = []
+        for job_id, *row in rows:
+            query = db.Query("pub_proc", "top 1 MAX(id), started")
+            query.where("status = 'Success'")
+            query.where("pub_subset = 'Export'")
+            query.where(f"id < {job_id}")
+            query.group("started").order("started DESC")
+
+            row = query.execute(self.cursor).fetchone()
+            date_range.append(row[1])
+
+        # The SQL query gives us the last job first, so we reverse the order
+        # here to get the start date for the job first again.
+        if date_range: date_range.reverse()
+        return [datetime.strftime(value, '%Y-%m-%d %H:%M:%S') for value in date_range]
 
 
 class Summary:
@@ -573,6 +653,12 @@ class SummarySet:
                    remember the date range used for the report.
         """
 
+        is_new = ""
+        if self.new:
+            is_new = "New "
+        if self.audience:
+            self.control.logger.debug(f"{is_new}{self.doc_type} - {self.audience}")
+
         # Set paths here so we can avoid super-long code lines.
         l_path = "/Summary/SummaryMetaData/SummaryLanguage"
         a_path = "/Summary/SummaryMetaData/SummaryAudience"
@@ -610,7 +696,7 @@ class SummarySet:
                         "m.path = '/%s/DateLastModified'" % self.doc_type)
         date_val = "ISNULL(%s, 0)" % (self.new and "d.first_pub" or "m.value")
         query.where(query.Condition(date_val, control.start, ">="))
-        query.where(query.Condition(date_val, control.end + " 23:59:59", "<="))
+        query.where(query.Condition(date_val, control.end, "<="))
 
         # For summaries we do each audience separately.
         if self.audience:
@@ -637,12 +723,119 @@ class SummarySet:
         control.logger.debug(query)
 
         # Fetch the documents and pack up a sequence of Summary objects.
-        # query.log()
         start = datetime.now()
         rows = query.execute(control.cursor).fetchall()
         args = len(rows), datetime.now() - start
         control.logger.debug("get_summaries(): %d rows in %s", *args)
-        return [Summary(self, *row) for row in rows]
+
+        summaries = []
+        control.logger.debug(rows)
+
+        for row in rows:
+            id = row[0]
+            # Check if latest pub version of summary was created after
+            # the last publishing job started
+            if self.late_pubversion(control, id):
+                if self.is_published(control, id):
+                    summaries.append(row)
+                continue
+            summaries.append(row)
+
+        if summaries:
+            return [Summary(self, *row) for row in summaries]
+        return summaries
+
+
+    def late_pubversion(self, control, doc_id):
+        """
+        Test if this document should be included in the output based on
+        the version number.
+        If the last publishable version has been created *after* the last
+        last publishing job ran this document will have to be excluded.
+        Note:
+        If a publishable version exists that was created after the weekly
+        publishing job started but there also exists an earlier publishable
+        version created within the specified date range, we will still
+        exclude the document because the DateLastModified cannot be
+        correctly determined.  The query_term_pub table used to retrieve
+        the DLM will only show the value for the latest publishable version.
+        We would have to retrieve the version's xml document and inspect
+        the DLM date since the query_term table only stores the info from
+        the latest version.
+        """
+
+        # Does a publishable version exist that was created after the
+        # publishing job started?
+        subq = db.Query("pub_proc_doc pd", "max(doc_version)")
+        subq.join("pub_proc pp", "pp.id = pd.pub_proc")
+        subq.where(f"doc_id = {doc_id}")
+        subq.where("o.id = pd.doc_id")
+        subq.where("failure IS NULL")
+        subq.where("pub_subset like 'Push%Export'")
+
+        query = db.Query("doc_version o", "num", "dt")
+        query.where(query.Condition("num", subq, ">"))
+        query.where("publishable = 'Y'")
+
+        control.logger.debug(query)  ## Testing
+
+        row = query.execute(control.cursor).fetchone()
+
+        if row:
+            # Found a publishable version created too late to be included
+            return True
+        # The publishable version was created within specified date reange
+        return False
+
+
+    def is_published(self, control, doc_id):
+        """
+        It has been identified that the latest publishable version of
+        this document has been created too late to be included.
+        However, it's still possible an earlier version of the document was
+        included in the publishing run and should still be used.
+        Check if the previous publishable version was created within the
+        required date range. In that case the document will be included,
+        otherwise is will be excluded.
+        Note:
+        This test does not cover all possible scenarios but other it has
+        been decided not to prevent additional edge cases of the given
+        edge case we're trying to address.
+        """
+
+        # Does a publishable version exist that was created after the
+        # publishing job started?
+        # Retrieve the version number and creation date for that version
+        subq = db.Query("pub_proc_doc pd", "max(doc_version)")
+        subq.join("pub_proc pp", "pp.id = pd.pub_proc")
+        subq.where(f"doc_id = {doc_id}")
+        subq.where("o.id = pd.doc_id")
+        subq.where("failure IS NULL")
+        subq.where("pub_subset like 'Push%Export'")
+
+        query = db.Query("doc_version o", "num", "dt")
+        query.where(query.Condition("num", subq, "="))
+        query.where("publishable = 'Y'")
+
+        control.logger.debug(query)  ## Testing
+
+        row = query.execute(control.cursor).fetchone()
+
+        control.logger.info(f"*** Pub version for {doc_id} created after "
+                             "job started!!!")
+        control.logger.info("*** Inspection previous pub version")
+        control.logger.info(row)
+
+        dformat = "%Y-%m-%d %H:%M:%S"
+        dt_start = datetime.strptime(control.start, dformat)
+        dt_end = datetime.strptime(control.end, dformat)
+
+        if row and dt_start < row[1] and dt_end > row[1]:
+            # This version matches our date range
+            return True
+        # The version was published outside our date range
+        return False
+
 
     def table(self):
         "Show a single summary results set for the report."
@@ -699,7 +892,7 @@ def main():
     parser.add_argument("--recip", help="optional email address for testing")
     parser.add_argument("--tier", help="override default tier")
     parser.add_argument("--timeout", type=int, default=300,
-                        help="how seconds to wait for SQL Server")
+                        help="how many seconds to wait for SQL Server")
     args = parser.parse_args()
     opts = dict(format=Logging.FORMAT, level=args.log_level.upper())
     logging.basicConfig(**opts)
