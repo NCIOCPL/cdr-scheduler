@@ -169,7 +169,7 @@ class Terms:
                     self.id = doc_id
                     self.dictionaries = dict(en=set(), es=set())
 
-            self._concepts = {}
+            concepts = {}
             tags = dict(en="TermDefinition", es="TranslatedTermDefinition")
             for lang in tags:
                 path = "/GlossaryTermConcept/{}/Dictionary".format(tags[lang])
@@ -179,10 +179,11 @@ class Terms:
                 args = len(rows), lang
                 self.logger.debug("fetched %d %s dictionaries", *args)
                 for doc_id, dictionary in rows:
-                    concept = self._concepts.get(doc_id)
+                    concept = concepts.get(doc_id)
                     if not concept:
-                        concept = self._concepts[doc_id] = Concept(doc_id)
+                        concept = concepts[doc_id] = Concept(doc_id)
                     concept.dictionaries[lang].add(dictionary.strip())
+            self._concepts = concepts
         return self._concepts
 
     @property
@@ -210,7 +211,7 @@ class Terms:
         """Fetch variant names from the external_map table."""
 
         if not hasattr(self, "_extra_names"):
-            self._extra_names = {}
+            extra_names = {}
             for langcode in Term.USAGES:
                 query = db.Query("external_map m", "m.value", "m.doc_id")
                 query.join("external_map_usage u", "u.id = m.usage")
@@ -224,7 +225,8 @@ class Terms:
                         names[doc_id] = [name]
                     else:
                         names[doc_id].append(name)
-                self._extra_names[langcode] = names
+                extra_names[langcode] = names
+            self._extra_names = extra_names
         return self._extra_names
 
     @property
@@ -284,10 +286,11 @@ class Terms:
         """
 
         if not hasattr(self, "_servers"):
-            self._servers = cdr.getControlGroup(self.GROUP)
-            if not self._servers:
+            servers = cdr.getControlGroup(self.GROUP)
+            if not servers:
                 server = self.tier.hosts.get("DRUPAL")
-                self._servers = dict(Primary="https://{}".format(server))
+                servers = dict(Primary="https://{}".format(server))
+            self._servers = servers
         return self._servers
 
     @property
@@ -309,7 +312,7 @@ class Terms:
         if not hasattr(self, "_usages"):
 
             # Start with an empty usages dictionary.
-            self._usages = {}
+            usages = {}
 
             # Get the dictionary of Concept object with dictionary information.
             concepts = self.concepts
@@ -333,7 +336,10 @@ class Terms:
             # Use the term information to populate the usages dictionary.
             for term_id, doc_xml, concept_id in rows:
                 term = Term(self, term_id, doc_xml, concepts.get(concept_id))
-                term.record_usages(self._usages)
+                term.record_usages(usages)
+
+            # Plug in the dictionary to the property.
+            self._usages = usages
 
         return self._usages
 
