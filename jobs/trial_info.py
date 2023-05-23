@@ -444,7 +444,7 @@ class Loader(Job):
                 fp.write(f"{dumps(label)}\n")
 
     def __fetch(self, codes):
-        """Fetch a concept and its children recursively.
+        """Fetch concepts and their children recursively.
 
         Populates the `concepts` property as a side effect.
 

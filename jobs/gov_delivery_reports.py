@@ -1,11 +1,17 @@
 """Run the GovDelivery reports.
 """
 
-import cdr
+from cdr import BASEDIR, EmailMessage, Logging
 from cdrapi import db
-import datetime
-import json
+from cdrapi.docs import Doc
+from cdrapi.settings import Tier
+from cdrapi.users import Session
+from datetime import date, datetime, timedelta
+from functools import cache, cached_property
+from json import loads
 from .base_job import Job
+
+import sys
 
 
 class ReportTask(Job):
@@ -21,15 +27,17 @@ class ReportTask(Job):
         "reports",
         "skip-email",
         "start",
+        "tier",
         "timeout",
     }
 
     def run(self):
         "Hand off the real work to the Control object."
+
         reports = self.opts.get("reports")
         if reports:
             try:
-                reports = json.loads(reports)
+                reports = loads(reports)
             except Exception:
                 if "," in reports:
                     reports = [r.strip() for r in reports.split(",")]
@@ -48,14 +56,11 @@ class Control:
     Class constants:
 
     TITLES          Map of report key to distinguishing part of report title.
-    DEFAULT_START   Fall back on this for beginning of date range for report.
-    DEFAULT_END     Fall back on this for end of date range.
     REPORTS         Full set of reports to be run by default (in order).
-    SENDER          First argument to cdr.EmailMessage constructor.
+    SENDER          First argument to EmailMessage constructor.
     CHARSET         Used in HTML page.
     TSTYLE          CSS formatting rules for table elements.
     TO_STRING_OPTS  Options used for serializing HTML report object.
-    CG              DNS name for this tier's Cancer.gov host.
     B               HTML builder module imported at Control class scope.
     HTML            HTML module imported at Control class scope.
 
@@ -66,19 +71,21 @@ class Control:
     skip_email      If true, don't send report to recipients; just save it.
     start           Beginning of date range for selecting documents for report.
     end             End of date range for selecting documents for report.
+    export_start    Date/time when export job starts. Will be used as default start
+    recip           Override for who should get the report.
     test            Convenience Boolean reflecting whether mode is 'test'.
     logger          Object for recording log information about the report.
     cursor          Object for submitting queries to the database.
+    tier            Object for the selected tier's settings.
     """
 
     import lxml.html.builder as B
     import lxml.html as HTML
     TITLES = {
-        "trials": "Trials",
         "english": "New/Changed English Summaries",
         "spanish": "New/Changed Spanish Summaries",
     }
-    REPORTS = ["english", "spanish", "trials"]
+    REPORTS = ["english", "spanish"]
     SENDER = "PDQ Operator <NCIPDQoperator@mail.nih.gov>"
     CHARSET = "utf-8"
     TSTYLE = (
@@ -93,15 +100,13 @@ class Control:
         "encoding": CHARSET,
         "doctype": "<!DOCTYPE html>"
     }
-    TIER = cdr.Tier()
-    CG = TIER.hosts["CG"]
 
     def __init__(self, options, logger):
         """
         Validate the settings:
 
         reports
-            "english", "spanish", and/or "trials"; defaults to all three
+            "english" and/or "spanish"; defaults to both
 
         mode
             must be "test" or "live" (required); test mode restricts
@@ -115,37 +120,71 @@ class Control:
             "info", "debug", or "error"; defaults to "info"
 
         start
-            overrides the default start of the date range (a week ago)
+            overrides the default start of the date range (start of second
+            to last weekly publishing job)
 
         end
-            overrides the default end of the date range (today)
+            overrides the default end of the date range (start of last
+            weekly publishing job)
 
         recip
             optional email address for testing so we don't spam others
 
         timeout
             how many seconds we'll wait for a connection or a query
+
+        tier
+            overrides the default of this server's local tier
         """
 
-        self.TODAY = datetime.date.today()
-        self.DEFAULT_END = self.TODAY - datetime.timedelta(1)
-        self.DEFAULT_START = self.TODAY - datetime.timedelta(7)
+        # The default start/end used to be the week before today but has
+        # changed to use the period between the last two weekly publishing
+        # jobs
+        #
+        # default_start = date.today() - timedelta(7)
+        # default_end = date.today() - timedelta(1)
         self.logger = logger
-        self.logger.info("====================================")
+        self.logger.info("=" * 40)
         self.reports = options.get("reports") or self.REPORTS
         self.mode = options["mode"]
         self.skip_email = options.get("skip-email", False)
-        self.start = options.get("start") or str(self.DEFAULT_START)
-        self.end = options.get("end") or str(self.DEFAULT_END)
         self.test = self.mode == "test"
+        self.tier = Tier(options.get("tier"))
         self.recip = options.get("recip")
         timeout = int(options.get("timeout", 300))
-        self.cursor = db.connect(user="CdrGuest", timeout=timeout).cursor()
+        opts = dict(user="CdrGuest", timeout=timeout, tier=self.tier.name)
+        self.cursor = db.connect(**opts).cursor()
+
+        # The report covers by default a full week and displays documents
+        # published between the last weekly publishing job and the one
+        # before that. This job used to run on a Sunday and include documents
+        # for the week before that (Sunday through Saturday).  The publishing
+        # job typically runs at 16:00h on Friday.  A document that is made
+        # publishable after the Friday job started but before this report
+        # starts on Sunday will incorrectly include such a document (assuming a
+        # publishable version hasn't also been created during the specified
+        # date range).  Therefore, in order to exclude such outliers,
+        # we need to run the report from the previous-Friday-job through the
+        # last Friday job. That start time is captured in self.export_start
+
+        # Unless a date is specified the default date range covers the dates
+        # between the last two successful 'Export' jobs.
+        # ---------------------------------------------------------------------
+        self.export_start, self.export_end = self.get_export_start_times()
+        self.start = options.get("start") or str(self.export_start)
+        self.end = options.get("end") or str(self.export_end)
+
+        ##### For Testing #####
+        # self.start = "2022-10-30"
+        # self.end = "2022-11-05"
+        ##### For Testing #####
+
         if self.skip_email:
             self.logger.info("skipping email of reports")
 
     def run(self):
         "Run each of the reports we've been asked to create."
+
         for key in self.reports:
             try:
                 self.do_report(key)
@@ -161,35 +200,39 @@ class Control:
                   See Control.REPORTS for expected values.
         """
 
-        title_args = (self.TITLES[key], self.start, self.end)
+        title_args = (self.TITLES[key], self.start.split()[0],
+                      self.end.split()[0])
         self.title = "GovDelivery %s Report (%s to %s)" % title_args
+        self.sub_title = "Date/Time: (%s to %s)" % (self.export_start,
+                                                     self.export_end)
+        self.logger.info(self.title)      ## Testing
+        self.logger.info(self.sub_title)  ## Testing
+
         self.key = key
         report = self.create_report()
         self.logger.debug("report\n%s", report)
+
         if not self.skip_email:
             self.send_report(report)
+
         self.save_report(report)
-        self.logger.info(self.title)
+
 
     def create_report(self):
         """
         Create an HTML document for one of this job's reports.
 
-        The report on new trials deals with all of the new trials as a
-        single result set, so we can hand off the generation of the
-        report to the single TrialSet instance. The reports on
-        summaries are broken down to show lots of subsets of the
-        documents in separate tables, so we handle the logic here,
-        instantiating as many SummarySet objects as we need (by
-        calling the summary_table() method below).
+        The reports on summaries are broken down to show lots of
+        subsets of the documents in separate tables, so we handle the
+        logic here, instantiating as many SummarySet objects as we
+        need (by calling the summary_table() method below).
         """
 
-        if self.key == "trials":
-            return TrialSet(self).report()
         style = "font-size: .9em; font-style: italic; font-family: Arial"
         body = self.B.BODY(
             self.B.H3(self.title, style="color: navy; font-family: Arial;"),
-            self.B.P("Report date: %s" % datetime.date.today(), style=style)
+            self.B.P("Adjusted date range: %s" % self.sub_title, style=style),
+            self.B.P("Report date: %s" % date.today(), style=style)
         )
         for audience in ("Health professionals", "Patients"):
             body.append(self.summary_table("Summary", True, audience))
@@ -198,6 +241,7 @@ class Control:
             body.append(self.summary_table("DrugInformationSummary", True))
             body.append(self.summary_table("DrugInformationSummary", False))
         return self.serialize(self.B.HTML(self.html_head(), body))
+
 
     def summary_table(self, doc_type, new, audience=None):
         """
@@ -221,6 +265,7 @@ class Control:
             args["language"] = self.key.capitalize()
         return SummarySet(self, **args).table()
 
+
     def save_report(self, report):
         """
         Write the generated report to the cdr/reports directory.
@@ -228,14 +273,12 @@ class Control:
         report    Serialized HTML document for the report.
         """
 
-        now = datetime.datetime.now().isoformat()
-        stamp = now.split(".")[0].replace(":", "").replace("-", "")
-        test = self.test and ".test" or ""
-        name = "gd-%s-%s%s.html" % (self.key, stamp, test)
-        path = "%s/reports/%s" % (cdr.BASEDIR, name)
-        fp = open(path, "wb")
-        fp.write(report)
-        fp.close()
+        stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+        test = ".test" if self.test else ""
+        name = f"gd-{self.key}-{stamp}{test}.html"
+        path = f"{BASEDIR}/reports/{name}"
+        with open(path, "wb") as fp:
+            fp.write(report)
         self.logger.info("created %s", path)
 
     def html_head(self):
@@ -261,18 +304,22 @@ class Control:
                 group = {
                     "spanish": "GovDelivery ES Docs Notification",
                     "english": "GovDelivery EN Docs Notification",
-                    "trials": "GovDelivery Trials Notification"
                 }.get(self.key)
                 recips = Job.get_group_email_addresses(group)
         if recips:
-            subject = "[%s] %s" % (self.TIER.name, self.title)
+            subject = f"[{self.tier.name}] {self.title}"
             opts = dict(subject=subject, body=report, subtype="html")
-            message = cdr.EmailMessage(self.SENDER, recips, **opts)
+            message = EmailMessage(self.SENDER, recips, **opts)
             message.send()
             self.logger.info("sent %s", subject)
             self.logger.info("recips: %s", ", ".join(recips))
         else:
             self.logger.error("no email recipients for %s", group)
+
+    @cached_property
+    def session(self):
+        """Guest session for fetching documents."""
+        return Session("guest", tier=self.tier.name)
 
     @classmethod
     def th(cls, label, **styles):
@@ -311,6 +358,8 @@ class Control:
         style = cls.merge_styles(default_styles, **styles)
         if url:
             return cls.B.TD(cls.B.A(data, href=url), style=style)
+        elif isinstance(data, (list, tuple)):
+            return cls.B.TD(*data, style=style)
         return cls.B.TD(data, style=style)
 
     @classmethod
@@ -352,166 +401,117 @@ class Control:
         """
 
         d = dict(defaults, **styles)
-        s = ["%s:%s" % (k.replace("_", "-"), v) for k, v in d.items()]
+        s = [f"""{k.replace("_", "-")}:{v}""" for k, v in d.items()]
         return ";".join(s)
 
 
-class Trial:
-    """
-    Represents a single new trial for the report.
-
-    nlm_id    NCT ID assigned by the National Library of Medicine (NLM).
-    cdr_id    Document ID for our own repository.
-    activated Date the trial began accepting patients.
-    title     Brief title assigned to the trial.
-    """
-
-    TRIAL_VIEW = "about-cancer/treatment/clinical-trials/search/view"
-    "Resource for trial link's URL."
-
-    def __init__(self, nlm_id, cdr_id, activated, title):
-        "Capture information needed to display this trial on the report."
-
-        self.nlm_id = nlm_id
-        self.cdr_id = cdr_id
-        self.activated = str(activated)[:10]
-        self.title = title
-
-    def view_url(self):
-        "Construct URL for viewing the trial information on cancer.gov."
-        values = (Control.CG, self.TRIAL_VIEW, self.cdr_id)
-        return "http://%s/%s?cdrid=%s" % values
-
-    def tr(self):
+    def get_export_start_times(self):
         """
-        Create the object for the row displaying this trial's information
-        in a table.
+        Get the start times of the previous 2 Export jobs. Those are the
+        immediate successful Export jobs before a successful Push job.
+        We're only interested to display documents that did get published
+        to Cancer.gov.  Therefore, we have to ensure the documents were
+        pushed and not just exported.
+        We then will identify the timestamp for the corresponding Export jobs.
         """
+        # Select the last 2 publishing job times of a successful job
+        query = db.Query("pub_proc", "top 2 id").order("id DESC")
+        query.where("status = 'Success'")
+        query.where("pub_subset = 'Push_Documents_To_Cancer.gov_Export'")
 
-        url = self.view_url()
-        return Control.B.TR(
-            Control.td(self.nlm_id, url),
-            Control.td(str(self.cdr_id)),
-            Control.td(self.title, url),
-            Control.td(self.activated, white_space="nowrap")
-        )
+        # self.logger.info(query)
 
-    def li(self):
-        """
-        Create the object for the list item displaying this trial's
-        information in an unordered list.
-        """
+        rows = query.execute(self.cursor).fetchall()
+        # self.logger.info(rows)
 
-        url = self.view_url()
-        return Control.li(self.title, url)
+        date_range = []
+        for job_id, *row in rows:
+            query = db.Query("pub_proc", "top 1 MAX(id), started")
+            query.where("status = 'Success'")
+            query.where("pub_subset = 'Export'")
+            query.where(f"id < {job_id}")
+            query.group("started").order("started DESC")
 
-    def __str__(self):
-        "Display string for debugging."
-        values = (self.nlm_id, self.cdr_id, self.activated, repr(self.title))
-        return "%s (CDR%s) activated %s (%s)" % values
+            row = query.execute(self.cursor).fetchone()
+            date_range.append(row[1])
 
-
-class TrialSet:
-    """
-    Set of all of the trials to be shown on this report.
-
-        control   Object which has wrappers for using the lxml package's
-                  factory methods to generate HTML elements.
-        trials    Ordered sequence of Trial objects.
-    """
-
-    def __init__(self, control):
-        "Create and execute the database query to collect the report's trials."
-        self.control = control
-        end = f"{control.end} 23:59:59"
-        activated = "ISNULL(c.became_active, 0)"
-        columns = ("c.nlm_id", "c.cdr_id", "c.became_active", "q.value")
-        query = db.Query("ctgov_import c", *columns)
-        query.join("pub_proc_cg p", "p.id = c.cdr_id")
-        query.join("query_term_pub q", "q.doc_id = c.cdr_id")
-        query.where("q.path = '/CTGovProtocol/BriefTitle'")
-        query.where(query.Condition(activated, control.start, ">="))
-        query.where(query.Condition(activated, end, "<="))
-        control.logger.debug("query:\n%s", query)
-        query.order("c.nlm_id").execute(control.cursor)
-        rows = control.cursor.fetchall()
-        control.logger.debug("%d rows", len(rows))
-        self.trials = [Trial(*row) for row in rows]
-
-    def report(self):
-        """
-        Returns an object for the report's HTML page.
-        We show the data set twice: once as a table and then as a list.
-        """
-
-        if not self.trials:
-            return "<p>No new trials.</p>"
-        p_style = "font-size: .9em; font-style: italic; font-family: Arial"
-        html = Control.B.HTML(
-            self.control.html_head(),
-            Control.B.BODY(
-                Control.B.H3(self.control.title, style="font-family: Arial"),
-                Control.B.P("Report date: %s" % datetime.date.today(),
-                            style=p_style),
-                self.table(),
-                self.ul()
-            )
-        )
-        return Control.serialize(html)
-
-    def table(self):
-        "Returns the object for the report's HTML table."
-        style = "font-weight: bold; font-size: 1.2em; font-family: Arial;"
-        style += "text-align: left;"
-        table = Control.B.TABLE(
-            Control.B.CAPTION("New Trials", style=style),
-            Control.B.TR(
-                Control.th("NCT ID"),
-                Control.th("CDR ID"),
-                Control.th("Title"),
-                Control.th("Activated")
-            ),
-            style=Control.TSTYLE
-        )
-        for trial in self.trials:
-            self.control.logger.debug(str(trial))
-            table.append(trial.tr())
-        return table
-
-    def ul(self):
-        "Returns the object for the report's unordered list."
-        title = "Clinical Trials Now Accepting New Patients"
-        ul = Control.B.UL()
-        for trial in self.trials:
-            ul.append(trial.li())
-        ff = "font-family: Arial"
-        return Control.B.DIV(
-            Control.B.H3("Data from table above as a bulleted list", style=ff),
-            Control.B.P(title, style="font-weight: bold; font-family: Arial"),
-            ul
-        )
+        # The SQL query gives us the last job first, so we reverse the order
+        # here to get the start date for the job first again.
+        if date_range: date_range.reverse()
+        return [datetime.strftime(value, '%Y-%m-%d %H:%M:%S') for value in date_range]
 
 
 class Summary:
     """
     Represents a single document for the report.
 
-    cdr_id     Unique ID of the document in the CDR.
-    title      Title extracted from the summary document.
-    url        URL used to view the document on cancer.gov.
-    fragment   Added to the URL to link to the "changes" section
-               of the document on cancer.gov (only used for English
-               'Summary' documents).
+    summary_set Access to selection criteria for set containing this summary
+    control     Access to runtime information we need (e.g., the tier)
+    cdr_id      Unique ID of the document in the CDR.
+    title       Title extracted from the summary document.
+    url         URL used to view the document on cancer.gov.
+    fragment    Added to the URL to link to the "changes" section
+                of the document on cancer.gov (only used for English
+                'Summary' documents).
     """
 
-    def __init__(self, cdr_id, title, url, fragment):
+    CHANGES = "SummarySection[SectMetaData/SectionType='Changes to summary']"
+    ORG_NAME = "/Organization/OrganizationNameInformation/OfficialName/Name"
+    BOARD = "PDQ Adult Treatment Editorial Board"
+    BOARD = "/Summary/SummaryMetaData/PDQBoard/Board/@cdr:ref"
+
+    def __init__(self, summary_set, cdr_id, title, url, fragment):
         "Capture the information needed to show this document on the report."
+
+        self.summary_set = summary_set
+        self.control = summary_set.control
         self.cdr_id = cdr_id
         self.title = title
         self.url = url
-        self.fragment = fragment
+        self.fragment = fragment or ""
 
-    def tr(self, summary_set):
+    def __lt__(self, other):
+        """Sort based on calculated key.
+
+        Pass:
+            other - reference to object to which this one is being compared
+
+        Return:
+            True if this object should come before the other object
+        """
+
+        return self.key < other.key
+
+    @cached_property
+    def board(self):
+        """Board name (if we have one)."""
+
+        if self.summary_set.doc_type != "Summary":
+            return ""
+        query = db.Query("query_term n", "n.value")
+        query.join("query_term b", "b.int_val = n.doc_id")
+        query.where(f"b.path = '{self.BOARD}'")
+        query.where(f"n.path = '{self.ORG_NAME}'")
+        query.where("n.value LIKE 'PDQ%Editorial Board'")
+        if self.summary_set.language == "English":
+            query.where(query.Condition("b.doc_id", self.cdr_id))
+        else:
+            query.join("query_term t", "t.int_val = b.doc_id")
+            query.where("t.path = '/Summary/TranslationOf/@cdr:ref'")
+            query.where(query.Condition("t.doc_id", self.cdr_id))
+        rows = query.execute(self.control.cursor).fetchall()
+        if not rows:
+            return ""
+        board = rows[0].value.replace("PDQ", "").replace("Editorial Board", "")
+        return board.strip()
+
+    @cached_property
+    def key(self):
+        """Sort by board (if we have one) and then by title."""
+        return self.board, self.title.lower()
+
+    @cached_property
+    def tr(self):
         """
         Create the object for the row displaying this document's information
         in a table.
@@ -520,21 +520,89 @@ class Summary:
         """
 
         frag_url = None
-        if summary_set.doc_type == "Summary":
-            if summary_set.audience == "Health professionals":
-                frag_url = "%s#section/%s" % (self.url, self.fragment or "")
-        return Control.B.TR(
-            Control.td(str(self.cdr_id), self.url, width="10%"),
-            Control.td(self.title, frag_url, width="90%")
-        )
+        changed_hp = False
+        columns = [Control.td(str(self.cdr_id), self.url)]
+        if self.summary_set.audience == "Health professionals":
+            frag_url = f"{self.url}#{self.fragment}"
+            columns.append(Control.td(self.title, frag_url))
+            columns.append(Control.td(self.board))
+            if not self.summary_set.new:
+                columns.append(Control.td(self.changes or ""))
+        else:
+            columns.append(Control.td(self.title))
+        return Control.B.TR(*columns)
+
+    @cached_property
+    def changes(self):
+        """Get information for last column in HP summary tables.
+
+        "As discussed, we would like to modify the weekly English and
+        Spanish GovDelivery reports of new/changed summaries to add a third
+        column to the New and Revised Health Professional Summaries tables
+        displaying the titles of the subsections that include changes
+        highlighted in the changes section.
+
+        To populate this new column (which can be named "Section(s)") with
+        data from the last publishable version of the summary, the software
+        should:
+
+        1. locate the "Changes to summary" section (from the section metadata)
+        2. Identify text that is in both strong & para tags (our convention
+           is to use strong & para tags to represent headings of sections
+           containing changes. If we used section tags, these would show up as
+           sections in the table of contents. I am sure this is very
+           consistently applied.)
+        3. Capture this text and display it on the report
+        4. If there isn't any text in the Changes to summary section that
+           fits #2 above (strong & para tags), please display the complete
+           string of text in the Changes to summary section.
+
+        I will attach an example.
+
+        If possible, we would like to complete this change by Nov 1."
+
+        See enhancement request OCECDR-5143.
+
+        Read all the comments in the ticket to find all the ways in which
+        the original requirements were changed.
+        """
+
+        changes = []
+        style = "margin: 0 3px 1rem;"
+        try:
+            doc = Doc(self.control.session, id=self.cdr_id, version="lastp")
+            blocks = doc.root.xpath(self.CHANGES)
+        except Exception:
+            self.control.logger.exception("document %s", self.cdr_id)
+            return changes
+        for block in blocks:
+            for para in block.iter("Para"):
+                for strong in para.iter("Strong"):
+                    section = Doc.get_text(strong, "").strip()
+                    if section:
+                        changes.append(Control.B.P(section, style=style))
+        if changes:
+            return changes
+        for block in blocks:
+            for metadata in block.iter("SectMetaData"):
+                block.remove(metadata)
+            for title in block.iter("Title"):
+                block.remove(title)
+            for para in block.iter("Para"):
+                block.remove(para)
+                break
+            text = Doc.get_text(block, "").strip()
+            if text:
+                changes.append(Control.B.P(text, style=style))
+        return changes
 
     def __str__(self):
         "Display string for debugging."
+
         url = self.url
         if self.fragment:
-            url += "#section/%s" % self.fragment
-        values = (self.cdr_id, url, repr(self.title))
-        return "CDR%s (%s) %s" % values
+            url += f"#section/{self.fragment}"
+        return f"CDR{self.cdr_id} ({url}) {self.title!r}"
 
 
 class SummarySet:
@@ -585,6 +653,12 @@ class SummarySet:
                    remember the date range used for the report.
         """
 
+        is_new = ""
+        if self.new:
+            is_new = "New "
+        if self.audience:
+            self.control.logger.debug(f"{is_new}{self.doc_type} - {self.audience}")
+
         # Set paths here so we can avoid super-long code lines.
         l_path = "/Summary/SummaryMetaData/SummaryLanguage"
         a_path = "/Summary/SummaryMetaData/SummaryAudience"
@@ -622,7 +696,7 @@ class SummarySet:
                         "m.path = '/%s/DateLastModified'" % self.doc_type)
         date_val = "ISNULL(%s, 0)" % (self.new and "d.first_pub" or "m.value")
         query.where(query.Condition(date_val, control.start, ">="))
-        query.where(query.Condition(date_val, control.end + " 23:59:59", "<="))
+        query.where(query.Condition(date_val, control.end, "<="))
 
         # For summaries we do each audience separately.
         if self.audience:
@@ -649,12 +723,119 @@ class SummarySet:
         control.logger.debug(query)
 
         # Fetch the documents and pack up a sequence of Summary objects.
-        # query.log()
-        start = datetime.datetime.now()
+        start = datetime.now()
         rows = query.execute(control.cursor).fetchall()
-        args = len(rows), datetime.datetime.now() - start
+        args = len(rows), datetime.now() - start
         control.logger.debug("get_summaries(): %d rows in %s", *args)
-        return [Summary(*row) for row in rows]
+
+        summaries = []
+        control.logger.debug(rows)
+
+        for row in rows:
+            id = row[0]
+            # Check if latest pub version of summary was created after
+            # the last publishing job started
+            if self.late_pubversion(control, id):
+                if self.is_published(control, id):
+                    summaries.append(row)
+                continue
+            summaries.append(row)
+
+        if summaries:
+            return [Summary(self, *row) for row in summaries]
+        return summaries
+
+
+    def late_pubversion(self, control, doc_id):
+        """
+        Test if this document should be included in the output based on
+        the version number.
+        If the last publishable version has been created *after* the last
+        last publishing job ran this document will have to be excluded.
+        Note:
+        If a publishable version exists that was created after the weekly
+        publishing job started but there also exists an earlier publishable
+        version created within the specified date range, we will still
+        exclude the document because the DateLastModified cannot be
+        correctly determined.  The query_term_pub table used to retrieve
+        the DLM will only show the value for the latest publishable version.
+        We would have to retrieve the version's xml document and inspect
+        the DLM date since the query_term table only stores the info from
+        the latest version.
+        """
+
+        # Does a publishable version exist that was created after the
+        # publishing job started?
+        subq = db.Query("pub_proc_doc pd", "max(doc_version)")
+        subq.join("pub_proc pp", "pp.id = pd.pub_proc")
+        subq.where(f"doc_id = {doc_id}")
+        subq.where("o.id = pd.doc_id")
+        subq.where("failure IS NULL")
+        subq.where("pub_subset like 'Push%Export'")
+
+        query = db.Query("doc_version o", "num", "dt")
+        query.where(query.Condition("num", subq, ">"))
+        query.where("publishable = 'Y'")
+
+        control.logger.debug(query)  ## Testing
+
+        row = query.execute(control.cursor).fetchone()
+
+        if row:
+            # Found a publishable version created too late to be included
+            return True
+        # The publishable version was created within specified date reange
+        return False
+
+
+    def is_published(self, control, doc_id):
+        """
+        It has been identified that the latest publishable version of
+        this document has been created too late to be included.
+        However, it's still possible an earlier version of the document was
+        included in the publishing run and should still be used.
+        Check if the previous publishable version was created within the
+        required date range. In that case the document will be included,
+        otherwise is will be excluded.
+        Note:
+        This test does not cover all possible scenarios but other it has
+        been decided not to prevent additional edge cases of the given
+        edge case we're trying to address.
+        """
+
+        # Does a publishable version exist that was created after the
+        # publishing job started?
+        # Retrieve the version number and creation date for that version
+        subq = db.Query("pub_proc_doc pd", "max(doc_version)")
+        subq.join("pub_proc pp", "pp.id = pd.pub_proc")
+        subq.where(f"doc_id = {doc_id}")
+        subq.where("o.id = pd.doc_id")
+        subq.where("failure IS NULL")
+        subq.where("pub_subset like 'Push%Export'")
+
+        query = db.Query("doc_version o", "num", "dt")
+        query.where(query.Condition("num", subq, "="))
+        query.where("publishable = 'Y'")
+
+        control.logger.debug(query)  ## Testing
+
+        row = query.execute(control.cursor).fetchone()
+
+        control.logger.info(f"*** Pub version for {doc_id} created after "
+                             "job started!!!")
+        control.logger.info("*** Inspection previous pub version")
+        control.logger.info(row)
+
+        dformat = "%Y-%m-%d %H:%M:%S"
+        dt_start = datetime.strptime(control.start, dformat)
+        dt_end = datetime.strptime(control.end, dformat)
+
+        if row and dt_start < row[1] and dt_end > row[1]:
+            # This version matches our date range
+            return True
+        # The version was published outside our date range
+        return False
+
 
     def table(self):
         "Show a single summary results set for the report."
@@ -665,14 +846,18 @@ class SummarySet:
             style=Control.TSTYLE,
         )
         if self.summaries:
-            headers = Control.B.TR(
-                Control.th("CDR ID", width="10%"),
-                Control.th("Title", width="90%"),
-            )
+            summaries = self.summaries
+            headers = [Control.th("CDR ID"), Control.th("Title")]
+            if self.audience == "Health professionals":
+                summaries = sorted(self.summaries)
+                headers.append(Control.th("Board"))
+                if not self.new:
+                    headers.append(Control.th("Section(s)"))
+            headers = Control.B.TR(*headers)
             table.append(headers)
-            for summary in self.summaries:
+            for summary in summaries:
                 self.control.logger.debug(str(summary))
-                table.append(summary.tr(self))
+                table.append(summary.tr)
         else:
             table.append(Control.B.TR(Control.td("None")))
         return table
@@ -681,8 +866,12 @@ class SummarySet:
 def main():
     """
     Make it possible to run this task from the command line.
-    You'll have to modify the PYTHONPATH environment variable
-    to include the parent of this file's directory.
+
+    For usage information, enter
+
+        python -m jobs.gov_delivery_reports --help
+
+    from the scheduler directory.
     """
 
     import argparse
@@ -701,10 +890,11 @@ def main():
     parser.add_argument("--start", help="optional start of date range")
     parser.add_argument("--end", help="optional end of date range")
     parser.add_argument("--recip", help="optional email address for testing")
+    parser.add_argument("--tier", help="override default tier")
     parser.add_argument("--timeout", type=int, default=300,
-                        help="how seconds to wait for SQL Server")
+                        help="how many seconds to wait for SQL Server")
     args = parser.parse_args()
-    opts = dict(format=cdr.Logging.FORMAT, level=args.log_level.upper())
+    opts = dict(format=Logging.FORMAT, level=args.log_level.upper())
     logging.basicConfig(**opts)
     opts = dict([(k.replace("_", "-"), v) for k, v in args._get_kwargs()])
     Control(opts, logging.getLogger()).run()

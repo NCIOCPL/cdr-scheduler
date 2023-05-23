@@ -505,16 +505,27 @@ class Contact:
     def expire(self):
         """
         Update data partner's CDR document to reflect deactivation.
+
+        Note:
+           The deactivation status values have changed from
+             Test-inactive       --> Test-expired
+             Production-inactive --> Production-terminated
+           The old status values '%inactive' will now reflect partners
+           who aren't updating the data but haven't officially been terminated.
+           The corresponding status date elements, however, have not
+           been modified.
+             TestInactivationDate   reflects Test-expired status
+             ProductionInactivation reflects Production-terminated status
         """
 
         doc = Doc(self.control.session, id=self.org_id)
         root = doc.root
         node = root.find("LicenseeInformation/LicenseeStatus")
-        if node.text == "Test-inactive":
+        if node.text == "Test-expired":
             self.logger.warning("CDR%s already deactivated", self.org_id)
             return
         self.logger.info("Marking CDR%s as expired", self.org_id)
-        node.text = "Test-inactive"
+        node.text = "Test-expired"
         today = str(datetime.date.today())
         node = root.find("DateLastModified")
         if node is None:
@@ -536,7 +547,7 @@ class Contact:
             if child.text is None or not child.text.strip():
                 child.text = today
         if not self.control.test:
-            comment = "Marking account as inactive"
+            comment = "Marking account as expired"
             doc.check_out(force=True, comment=comment)
             opts = dict(
                 version=True,
