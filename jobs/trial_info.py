@@ -5,6 +5,7 @@ https://github.com/NCIOCPL/clinical-trials-listing-api/issues/2.
 """
 
 from argparse import ArgumentParser
+from collections import deque
 from datetime import date, datetime, timedelta
 from json import dump, dumps, loads, load
 from re import compile
@@ -12,6 +13,7 @@ from sys import stderr
 from time import sleep
 from unicodedata import combining, normalize
 from elasticsearch7 import Elasticsearch
+from elasticsearch7.helpers import parallel_bulk
 from requests import get
 from .base_job import Job
 from cdr import getControlValue, EmailMessage
@@ -550,6 +552,19 @@ class Loader(Job):
         opts = dict(index=info_index)
         if self.verbose:
             done = 0
+        # Experiment to load the group records in bulk.
+        # Reduces the time from around five minutes to three seconds.
+        group_start = datetime.now()
+        group_opts = dict(index=info_index, request_timeout=300)
+        try:
+            deque(parallel_bulk(self.es, groups, **group_opts))
+        except Exception as e:
+            print(f"loading {info_index}: {e}")
+            self.logger.exception("loading info index")
+            raise
+        elapsed = datetime.now() - group_start
+        print(f"elapsed: {elapsed}")
+        """
         for group in groups:
             self.logger.debug("indexing %s", group["concept_id"])
             opts["body"] = group
@@ -561,6 +576,7 @@ class Loader(Job):
             if self.verbose:
                 done += 1
                 stderr.write(f"\r{done} of {len(groups)} groups indexed")
+        """
         if self.verbose:
             stderr.write(f"\n{info_index} populated\n")
             done = 0
