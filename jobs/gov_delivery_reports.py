@@ -71,7 +71,8 @@ class Control:
     skip_email      If true, don't send report to recipients; just save it.
     start           Beginning of date range for selecting documents for report.
     end             End of date range for selecting documents for report.
-    export_start    Date/time when export job starts. Will be used as default start
+    export_start    Date/time when export job starts. Will be used as default
+                    start.
     recip           Override for who should get the report.
     test            Convenience Boolean reflecting whether mode is 'test'.
     logger          Object for recording log information about the report.
@@ -438,7 +439,7 @@ class Control:
         # The SQL query gives us the last job first, so we reverse the order
         # here to get the start date for the job first again.
         if date_range: date_range.reverse()
-        return [datetime.strftime(value, '%Y-%m-%d %H:%M:%S') for value in date_range]
+        return [value.strftime('%Y-%m-%d %H:%M:%S') for value in date_range]
 
 
 class Summary:
@@ -459,6 +460,10 @@ class Summary:
     ORG_NAME = "/Organization/OrganizationNameInformation/OfficialName/Name"
     BOARD = "PDQ Adult Treatment Editorial Board"
     BOARD = "/Summary/SummaryMetaData/PDQBoard/Board/@cdr:ref"
+    EDITORIAL_CHANGES = (
+        "Editorial changes were made to this summary",
+        "Se incorporaron cambios editoriales en este resumen",
+    )
 
     def __init__(self, summary_set, cdr_id, title, url, fragment):
         "Capture the information needed to show this document on the report."
@@ -481,6 +486,14 @@ class Summary:
         """
 
         return self.key < other.key
+
+    def __str__(self):
+        "Display string for debugging."
+
+        url = self.url
+        if self.fragment:
+            url += f"#section/{self.fragment}"
+        return f"CDR{self.cdr_id} ({url}) {self.title!r}"
 
     @cached_property
     def board(self):
@@ -506,31 +519,13 @@ class Summary:
         return board.strip()
 
     @cached_property
-    def key(self):
-        """Sort by board (if we have one) and then by title."""
-        return self.board, self.title.lower()
-
-    @cached_property
-    def tr(self):
-        """
-        Create the object for the row displaying this document's information
-        in a table.
-
-        summary_set   Provides additional information about the document.
-        """
-
-        frag_url = None
-        changed_hp = False
-        columns = [Control.td(str(self.cdr_id), self.url)]
-        if self.summary_set.audience == "Health professionals":
-            frag_url = f"{self.url}#{self.fragment}"
-            columns.append(Control.td(self.title, frag_url))
-            columns.append(Control.td(self.board))
-            if not self.summary_set.new:
-                columns.append(Control.td(self.changes or ""))
-        else:
-            columns.append(Control.td(self.title))
-        return Control.B.TR(*columns)
+    def change_blocks(self):
+        """'Changes to this Summary' section (should be only one)."""
+        try:
+            return self.doc.root.xpath(self.CHANGES)
+        except Exception:
+            self.control.logger.exception("document %s", self.cdr_id)
+            return []
 
     @cached_property
     def changes(self):
@@ -567,15 +562,8 @@ class Summary:
         the original requirements were changed.
         """
 
-        changes = []
         style = "margin: 0 3px 1rem;"
-        try:
-            doc = Doc(self.control.session, id=self.cdr_id, version="lastp")
-            blocks = doc.root.xpath(self.CHANGES)
-        except Exception:
-            self.control.logger.exception("document %s", self.cdr_id)
-            return changes
-        for block in blocks:
+        for block in self.change_blocks:
             for para in block.iter("Para"):
                 for strong in para.iter("Strong"):
                     section = Doc.get_text(strong, "").strip()
@@ -583,7 +571,7 @@ class Summary:
                         changes.append(Control.B.P(section, style=style))
         if changes:
             return changes
-        for block in blocks:
+        for block in self.change_blocks:
             for metadata in block.iter("SectMetaData"):
                 block.remove(metadata)
             for title in block.iter("Title"):
@@ -596,13 +584,48 @@ class Summary:
                 changes.append(Control.B.P(text, style=style))
         return changes
 
-    def __str__(self):
-        "Display string for debugging."
+    @cached_property
+    def doc(self):
+        """API Object representing the CDR Summary document."""
+        return Doc(self.control.session, id=self.cdr_id, version="lastp")
 
-        url = self.url
-        if self.fragment:
-            url += f"#section/{self.fragment}"
-        return f"CDR{self.cdr_id} ({url}) {self.title!r}"
+    @cached_property
+    def editorial_changes(self):
+        """True if only editorial changes have been made."""
+
+        for block in self.change_blocks:
+            text = Doc.get_text(block, "")
+            for phrase in self.EDITORIAL_CHANGES:
+                if phrase in text:
+                    return True
+        return False
+
+    @cached_property
+    def key(self):
+        """Sort by board (if we have one) and then by title."""
+        return self.board, self.title.lower()
+
+    @cached_property
+    def tr(self):
+        """
+        Create the object for the row displaying this document's information
+        in a table.
+
+        summary_set   Provides additional information about the document.
+        """
+
+        frag_url = None
+        changed_hp = False
+        columns = [Control.td(str(self.cdr_id), self.url)]
+        if self.summary_set.audience == "Health professionals":
+            frag_url = f"{self.url}#{self.fragment}"
+            columns.append(Control.td(self.title, frag_url))
+            columns.append(Control.td(self.board))
+            if not self.summary_set.new:
+                columns.append(Control.td(self.changes or ""))
+        else:
+            columns.append(Control.td(self.title))
+        return Control.B.TR(*columns)
 
 
 class SummarySet:
@@ -640,6 +663,14 @@ class SummarySet:
                 caption += "Patient Summaries"
             else:
                 caption += "Health Professional Summaries"
+                if self.new:
+                    caption += f" ({len(self.summaries)})"
+                else:
+                    count = 0
+                    for summary in self.summaries:
+                        if not summary.editorial_changes:
+                            count += 1
+                    caption += f" ({count}, excluding editorial changes)"
         else:
             caption += "Drug Information Summaries"
         self.control.logger.debug("%d %s", len(self.summaries), caption)
@@ -653,11 +684,10 @@ class SummarySet:
                    remember the date range used for the report.
         """
 
-        is_new = ""
-        if self.new:
-            is_new = "New "
+        is_new = "New " if self.new else ""
         if self.audience:
-            self.control.logger.debug(f"{is_new}{self.doc_type} - {self.audience}")
+            args = is_new, self.doc_type, self.audience
+            self.control.logger.debug(f"%s%s - %s", *args)
 
         # Set paths here so we can avoid super-long code lines.
         l_path = "/Summary/SummaryMetaData/SummaryLanguage"
