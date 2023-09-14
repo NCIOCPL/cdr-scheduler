@@ -563,6 +563,7 @@ class Summary:
         """
 
         style = "margin: 0 3px 1rem;"
+        changes = []
         for block in self.change_blocks:
             for para in block.iter("Para"):
                 for strong in para.iter("Strong"):
