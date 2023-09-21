@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Run the GovDelivery reports.
 """
 
@@ -462,7 +463,9 @@ class Summary:
     BOARD = "/Summary/SummaryMetaData/PDQBoard/Board/@cdr:ref"
     EDITORIAL_CHANGES = (
         "Editorial changes were made to this summary",
+        "Editorial changes were made to this module",
         "Se incorporaron cambios editoriales en este resumen",
+        "Se incorporaron cambios editoriales en este módulo",
     )
 
     def __init__(self, summary_set, cdr_id, title, url, fragment):
