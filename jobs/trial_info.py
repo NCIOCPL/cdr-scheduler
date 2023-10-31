@@ -5,7 +5,7 @@ https://github.com/NCIOCPL/clinical-trials-listing-api/issues/2.
 """
 
 from argparse import ArgumentParser
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from json import dump, dumps, loads, load
 from re import compile
 from sys import stderr
@@ -55,6 +55,8 @@ class Loader(Job):
     MAX_SLEEP = 500
     MAX_PRETTY_URL_LENGTH = 75
     BATCH_SIZE = 500
+    DAYS_TO_KEEP = 5
+    INDICES_TO_KEEP = 3
     SUPPORTED_PARAMETERS = {
         "auth",
         "concepts",
@@ -403,6 +405,34 @@ class Loader(Job):
         except Exception:
             self.logger.exception("failure sending to %r", recips)
 
+    def __cleanup(self):
+        """Prune old indices."""
+
+        indices = self.es.cat.indices(format="json")
+        cutoff_date = date.today() - timedelta(self.DAYS_TO_KEEP)
+        stamp = cutoff_date.strftime("%Y%m%d")
+        for alias in (self.INFO_ALIAS, self.TRIAL_ALIAS):
+            pattern = f"{alias}-20"
+            cutoff = f"{alias}-{stamp}"
+            self.logger.info("Cleanup cutoff: %s", cutoff)
+            candidates = []
+            for index in indices:
+                name = index["index"]
+                if name.startswith(pattern):
+                    candidates.append(name)
+            kept = min(len(candidates), self.INDICES_TO_KEEP)
+            candidates = sorted(candidates)[:-self.INDICES_TO_KEEP]
+            for name in candidates:
+                if name < cutoff:
+                    self.logger.info("dropping index %s", name)
+                    self.es.indices.delete(name)
+                else:
+                    kept += 1
+            if kept == 1:
+                self.logger.info("Kept one %s index", alias)
+            else:
+                self.logger.info("Kept %d %s indices", kept, alias)
+
     def __create_alias(self, index, alias):
         """Point the canonical name for the records to our new index."""
 
@@ -561,6 +591,9 @@ class Loader(Job):
             self.__create_alias(trial_index, self.TRIAL_ALIAS)
             if self.verbose:
                 stderr.write("index aliases updated\n")
+            self.__cleanup()
+            if self.verbose:
+                stderr.write("old indices pruned\n")
         self.logger.info("indexing completed in %s", datetime.now() - start)
 
 

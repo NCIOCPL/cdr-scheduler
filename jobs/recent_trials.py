@@ -2,21 +2,21 @@
 Find the latest trial documents in the ClinicalTrials.gov database
 which are relevant to cancer and record them in the CDR database.
 Optional command-line argument can be given to specify how far back
-to go for trials (using ISO format YYYY-MM-DD). Defaults to 21 days
+to go for trials (using ISO format YYYY-MM-DD). Defaults to 365 days
 before the latest first_received value in the ctgov_trial table,
 or 2015-01-01, if the table is empty (that is, we're running for
 the first time).
 
 JIRA::OCECDR-3877
 JIRA::OCECDR-4096
+JIRA::OCECDR-5264 - Switch to NLM's new API (old one is broken)
 """
 
-import cdr
+from cdr import Logging
 from cdrapi import db
-import datetime
-import lxml.etree as etree
-import requests
-import zipfile
+from datetime import date, datetime, timedelta
+from functools import cached_property
+from requests import get
 from .base_job import Job
 
 
@@ -39,29 +39,48 @@ class Control:
 
     Class constants:
 
+    BASE          Base URL for NLM's clinical trials service
+    CONDITIONS    Strings for conditions we want to search
+    DISEASES      Strings for diseases we want to search
+    SPONSOR       String for NCI as sponsor
     DESCRIPTION   String describing what the script does (for help)
-    NAME          Used for naming logs and zipfiles
-    ZIPFILE       We save the payload from NLM here.
+    FIELDS        Fields we want NLM to return
+    NAME          Used for naming log
     """
 
+    BASE = "https://clinicaltrials.gov/api/v2/studies"
+    CONDITIONS = (
+        "cancer",
+        "lymphedema",
+        "myelodysplastic+syndromes",
+        "neutropenia",
+        "aspergillosis",
+        "mucositis",
+        "neoplasm",
+    )
+    DISEASES = "cancer", "neoplasm"
+    FIELDS = (
+        "NCTId",
+        "OrgStudyId",
+        "SecondaryId",
+        "OfficialTitle",
+        "BriefTitle",
+        "Phase",
+        "StudyFirstSubmitDate",
+        "SponsorCollaboratorsModule",
+    )
+    SPONSOR = "National Cancer Institute"
     DESCRIPTION = "Get recent CT.gov Protocols"
     NAME = "RecentCTGovProtocols"
-    ZIPFILE = cdr.BASEDIR + "/Output/%s.zip" % NAME
 
     def __init__(self, options):
-        """
-        Find out how far back to ask for trials, and create logging and
-        database query objects.
+        """Remember the caller's options.
+
+        options - dictionary of run-time options
         """
 
-        self.logger = cdr.Logging.get_logger(self.NAME)
-        self.conn = db.connect(as_dict=True)
-        self.cursor = self.conn.cursor()
-        cutoff = options.get("cutoff")
-        if cutoff:
-            self.cutoff = self.parse_date(cutoff)
-        else:
-            self.cutoff = self.get_default_cutoff(self.cursor)
+        self.__options = options
+        self.oldest = None
 
     def run(self):
         """
@@ -70,171 +89,238 @@ class Control:
             1. Get the new trials from NLM.
             2. Record the ones we don't know about yet.
         """
+
         try:
-            if self.fetch():
+            if self.new_trials:
                 self.record()
+                if self.oldest:
+                    message = "earliest new trial date is %s"
+                    self.logger.info(message, self.oldest)
         except Exception:
             self.logger.exception("failed")
             raise
 
-    def fetch(self):
-        """
-        Fetch the cancer trials added since a certain point in time.
-        Save them to disk instead of just processing them in memory,
-        so we can examine what we got if something unexpected goes
-        wrong.
+    @cached_property
+    def conn(self):
+        """Connection to the CDR database."""
+        return db.connect()
 
-        Returns True if we got any trials; otherwise False.
-        """
+    @cached_property
+    def cursor(self):
+        """For running database queries."""
+        return self.conn.cursor()
+
+    @cached_property
+    def cutoff(self):
+        """How far back should we go to fetch trials?"""
+
+        cutoff = self.__options.get("cutoff")
+        if cutoff:
+            return datetime.strptime(cutoff, "%Y-%m-%d").date()
+        query = db.Query("ctgov_trial", "MAX(first_received) AS mfr")
+        rows = query.execute(self.cursor).fetchall()
+        for row in rows:
+            return (row.mfr - timedelta(365)).date()
+        return date(2015, 1, 1)
+
+    @cached_property
+    def logger(self):
+        """For recording what we do."""
+        return Logging.get_logger(self.NAME)
+
+    @cached_property
+    def new_trials(self):
+        """Clinical trials we don't already have."""
 
         # Assemble the query parameters.
         self.logger.info("fetching trials added on or after %s", self.cutoff)
-        conditions = ['cancer', 'lymphedema', 'myelodysplastic syndromes',
-                      'neutropenia', 'aspergillosis', 'mucositis']
-        diseases = ['cancer', 'neoplasm']
-        sponsor = "(National Cancer Institute) [SPONSOR-COLLABORATORS]"
-        conditions = "(%s) [CONDITION]" % " OR ".join(conditions)
-        diseases = "(%s) [DISEASE]" % " OR ".join(diseases)
-        term = "term=%s OR %s OR %s" % (conditions, diseases, sponsor)
-        cutoff = self.cutoff.strftime("&rcv_s=%m/%d/%Y")
-        params = "%s%s&studyxml=true" % (term, cutoff)
-        params = params.replace(" ", "+")
-
-        # Submit the request to NLM's server.
-        base = "http://clinicaltrials.gov/ct2/results"
-        url = "%s?%s" % (base, params)
+        conditions = f"AREA[Condition]({' OR '.join(self.CONDITIONS)})"
+        diseases = f"AREA[ConditionSearch]({' OR '.join(self.DISEASES)})"
+        sponsor = f"AREA[SponsorSearch]({self.SPONSOR})"
+        cutoff = f"AREA[StudyFirstSubmitDate]RANGE[{self.cutoff},MAX]"
+        term = f"({conditions} OR {diseases} OR {sponsor}) AND {cutoff}"
+        fields = ",".join(self.FIELDS)
+        params = f"query.term={term}&fields={fields}&pageSize=1000"
+        url = f"{self.BASE}?{params}"
         self.logger.info(url)
-        try:
-            response = requests.get(url)
-            bytes = response.content
-            if not bytes:
-                self.logger.warn("empty response (no trials?)")
-                return False
-        except Exception as e:
-            error = "Failure downloading trial set using %s: %s" % (url, e)
-            raise Exception(error)
 
-        # Save the response's payload for further processing.
-        fp = open(self.ZIPFILE, "wb")
-        fp.write(bytes)
-        fp.close()
+        # Loop to fetch all of the trials.
+        trials = []
+        fetched = 0
+        done = False
+        token = None
+        while not done:
+            try:
+                response = get(f"{url}&pageToken={token}" if token else url)
+                values = response.json()
+                studies = values["studies"]
+                token = values.get("nextPageToken")
+            except Exceptions:
+                args = response.reason, response.text
+                self.logger.exception("reason=%s response=%s", *args)
+                raise Exception(f"Unable to fetch trials for {url}")
+            for study in studies:
+                fetched += 1
+                trial = Trial(study)
+                if trial.nct_id and trial.nct_id not in self.old_trials:
+                    trials.append(trial)
+                    self.old_trials.add(trial.nct_id)
+                    if trial.first_received:
+                        if self.oldest is None:
+                            self.oldest = trial.first_received
+                        elif trial.first_received < self.oldest:
+                            self.oldest = trial.first_received
+            if not token:
+                done = True
+        self.logger.info("processed %d trials, %d new", fetched, len(trials))
+        return trials
 
-        # Yes, we got trials.
-        return True
-
-    def record(self):
-        """
-        Parse the trial documents and record the ones we don't already have.
-        """
+    @cached_property
+    def old_trials(self):
+        """NCT IDs for clinical trials we already have."""
 
         rows = db.Query("ctgov_trial", "nct_id").execute(self.cursor)
-        nct_ids = set([row.nct_id.upper() for row in rows])
-        zf = zipfile.ZipFile(self.ZIPFILE)
-        names = zf.namelist()
+        return {row.nct_id.upper() for row in rows}
+
+    def record(self):
+        """Save new trials to the database."""
+
         loaded = 0
-        for name in names:
+        for trial in self.new_trials:
             try:
-                xml = zf.read(name)
-                trial = Trial(xml)
-                if trial.nct_id and trial.nct_id.upper() not in nct_ids:
-                    self.logger.info("adding %s", trial.nct_id)
-                    nct_ids.add(trial.nct_id.upper())
-                    self.cursor.execute("""\
+                self.logger.info("adding %s", trial.nct_id)
+                self.cursor.execute("""\
 INSERT INTO ctgov_trial (nct_id, trial_title, trial_phase, first_received)
      VALUES (?, ?, ?, ?)""", (trial.nct_id, trial.title[:1024],
                               trial.phase and trial.phase[:20] or None,
                               trial.first_received))
-                    position = 1
-                    for other_id in trial.other_ids:
-                        self.cursor.execute("""\
+                position = 1
+                for other_id in trial.other_ids:
+                    self.cursor.execute("""\
 INSERT INTO ctgov_trial_other_id (nct_id, position, other_id)
      VALUES (?, ?, ?)""", (trial.nct_id, position, other_id[:1024]))
-                        position += 1
-                    position = 1
-                    for sponsor in trial.sponsors:
-                        self.cursor.execute("""\
+                    position += 1
+                position = 1
+                for sponsor in trial.sponsors:
+                    self.cursor.execute("""\
 INSERT INTO ctgov_trial_sponsor (nct_id, position, sponsor)
      VALUES (?, ?, ?)""", (trial.nct_id, position, sponsor[:1024]))
-                        position += 1
-                    self.conn.commit()
-                    loaded += 1
-            except Exception as e:
-                self.logger.error("%s: %s", name, e)
-        self.logger.info("processed %d trials, %d new", len(names), loaded)
-
-    @staticmethod
-    def get_default_cutoff(cursor=None):
-        """
-        Default cutoff is eight days earlier than the latest date we
-        have recorded for when a trial first landed on NLM's
-        doortstep. If this is the very first time we've run the
-        job on this server, we go all the way back to the beginning
-        of 2015.
-        """
-
-        query = db.Query("ctgov_trial", "MAX(first_received) AS mfr")
-        rows = query.execute(cursor).fetchall()
-        for row in rows:
-            return (row.mfr - datetime.timedelta(21)).date()
-        return datetime.date(2015, 1, 1)
-
-    @staticmethod
-    def parse_date(date):
-        """
-        Convert an ISO string to a datetime.date object.
-        """
-
-        return datetime.datetime.strptime(date, "%Y-%m-%d").date()
+                    position += 1
+                self.conn.commit()
+                loaded += 1
+            except Exception:
+                self.logger.exception(trial.nct_id)
+        self.logger.info("loaded %d new trials", loaded)
 
 
 class Trial:
     """
     Object holding information about a single clinical_trial document.
 
-    nci_id           NLM's unique ID for the trial document
+    nct_id           NLM's unique ID for the trial document
     other_ids        sequence of other (org study or secondary) IDs
     phase            string representing the current phase of the trial
     first_received   the date NLM first received the trial information
     sponsors         sequence of the names of the sponsors for the trial
     """
 
-    def __init__(self, xml):
-        """
-        Parse the trial document and extract the values we need.
+    PHASES = dict(
+        NA="N/A",
+        EARLY_PHASE1="Early Phase 1",
+        PHASE1="Phase 1",
+        PHASE2="Phase 2",
+        PHASE3="Phase 3",
+        PHASE4="Phase 4",
+    )
+
+    def __init__(self, values):
+        """Remember the values we got from NLM for the trial.
+
+        values - dictionary of values received from NLM
         """
 
-        root = etree.XML(xml)
-        self.nct_id = self.first_received = None
-        self.sponsors = []
-        self.other_ids = []
-        for node in root.findall("id_info/*"):
-            value = self.get_text(node)
-            if value:
-                if node.tag == "nct_id":
-                    self.nct_id = value
-                elif node.tag in ("org_study_id", "secondary_id"):
-                    self.other_ids.append(value)
-        self.title = self.get_text(root.find("brief_title"))
-        if not self.title:
-            self.title = self.get_text(root.findall("official_title"))
-        value = self.get_text(root.find("study_first_submitted"))
-        if value:
-            dt = datetime.datetime.strptime(value, "%B %d, %Y")
-            self.first_received = dt.date()
-        self.phase = self.get_text(root.find("phase"))
-        for node in root.findall("sponsors/*/agency"):
-            value = self.get_text(node)
-            if value:
-                self.sponsors.append(value)
+        self.__values = values or {}
 
-    @staticmethod
-    def get_text(node):
-        """
-        Get stripped text content from a node. Assumes no mixed content.
-        """
-        if node is not None and node.text is not None:
-            return node.text.strip()
-        return None
+    @cached_property
+    def first_received(self):
+        """When the trial was first submitted to NLM."""
+
+        module = self.protocol.get("statusModule")
+        return module.get("studyFirstSubmitDate") if module else None
+
+    @cached_property
+    def identification(self):
+        """Information about the trial's IDs."""
+        return self.protocol.get("identificationModule", {})
+
+    @cached_property
+    def id_info(self):
+        """Organization study ID information."""
+        return self.identification.get("orgStudyIdInfo", {})
+
+    @cached_property
+    def nct_id(self):
+        """NLM's unique ID for the trial."""
+        return self.identification.get("nctId")
+
+    @cached_property
+    def other_ids(self):
+        """Alternate IDs for the trial."""
+
+        other_ids = []
+        org_study_id = self.id_info.get("id", "").strip()
+        if org_study_id:
+            other_ids = [org_study_id]
+        for id_info in self.identification.get("secondaryIdInfos", []):
+            secondary_id = id_info.get("id", "").strip()
+            if secondary_id:
+                other_ids.append(secondary_id)
+        return other_ids
+
+    @cached_property
+    def phase(self):
+        """Mapped string value for the phase(s) we find."""
+
+        phases = []
+        module = self.protocol.get("designModule")
+        if module and "phases" in module:
+            for phase in module["phases"]:
+                phase = phase.strip()
+                if phase:
+                    phases.append(self.PHASES.get(phase, phase))
+        return "/".join(sorted(phases)) or None
+
+    @cached_property
+    def protocol(self):
+        """Wrapper for the trial's information."""
+        return self.__values.get("protocolSection", {})
+
+    @cached_property
+    def sponsors(self):
+        """Sequence of strings for the trial's sponsors."""
+
+        sponsors = []
+        module = self.protocol.get("sponsorCollaboratorsModule")
+        if module:
+            if "leadSponsor" in module:
+                name = module["leadSponsor"].get("name", "").strip()
+                if name:
+                    sponsors = [name]
+            if "collaborators" in module:
+                for collaborator in module["collaborators"]:
+                    name = collaborator.get("name", "").strip()
+                    if name:
+                        sponsors.append(name)
+        return sponsors
+
+    @cached_property
+    def title(self):
+        """Briefest title we can find for the trial."""
+
+        title = self.identification.get("briefTitle", "").strip()
+        if not title:
+            title = self.identification.get("officialTitle", "").strip()
+        return title or None
 
 
 def main():
@@ -246,10 +332,9 @@ def main():
     import argparse
     fc = argparse.ArgumentDefaultsHelpFormatter
     help = "how far back to go for new trials"
-    default = str(Control.get_default_cutoff())
     parser = argparse.ArgumentParser(description=Control.DESCRIPTION,
                                      formatter_class=fc)
-    parser.add_argument("--cutoff", default=default, help=help)
+    parser.add_argument("--cutoff", help=help)
     args = parser.parse_args()
     opts = dict([(k.replace("_", "-"), v) for k, v in args._get_kwargs()])
     Control(opts).run()
