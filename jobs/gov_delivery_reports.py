@@ -729,7 +729,7 @@ class SummarySet:
             query.outer("query_term_pub m", "m.doc_id = d.id",
                         "m.path = '/%s/DateLastModified'" % self.doc_type)
         date_val = "ISNULL(%s, 0)" % (self.new and "d.first_pub" or "m.value")
-        query.where(query.Condition(date_val, control.start, ">="))
+        query.where(query.Condition(date_val, control.start, ">"))
         query.where(query.Condition(date_val, control.end, "<="))
 
         # For summaries we do each audience separately.
