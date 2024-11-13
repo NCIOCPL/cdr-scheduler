@@ -43,7 +43,7 @@ class Monitor(Job):
     def notify(self):
         """Send alert for unreported problems, if time to do so."""
 
-        if Monitor.UNREPORTED_FAILURES and self.time_to_notify():
+        if Monitor.UNREPORTED_FAILURES and self.time_to_notify:
             problems = []
             for problem in Monitor.UNREPORTED_FAILURES:
                 count = Monitor.UNREPORTED_FAILURES[problem]
