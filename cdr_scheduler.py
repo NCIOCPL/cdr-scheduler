@@ -40,6 +40,7 @@ method of that class.
 from cdr import Logging
 from cdrapi import db
 from datetime import datetime
+from functools import cached_property
 from importlib import import_module
 from json import loads
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -94,50 +95,30 @@ class Control:
         except Exception:
             self.logger.exception("Failure deleting job %s", job_id)
 
-    @property
+    @cached_property
     def conn(self):
         """Read/write access to the database."""
+        return db.connect()
 
-        if not hasattr(self, "_conn"):
-            self._conn = db.connect()
-        return self._conn
-
-    @property
+    @cached_property
     def jobs(self):
         """Dictionary of `Control.Job` objects."""
+        return {}
 
-        if not hasattr(self, "_jobs"):
-            self._jobs = {}
-        return self._jobs
-
-    @property
+    @cached_property
     def logger(self):
         """Object for recording what we do."""
+        return Logging.get_logger("cdr-scheduler")
 
-        if not hasattr(self, "_logger"):
-            self._logger = Logging.get_logger("cdr-scheduler")
-        return self._logger
-
-    @property
+    @cached_property
     def scheduler(self):
         """Let the APScheduler package handle the scheduled jobs."""
+        return BackgroundScheduler(timezone="America/New_York")
 
-        if not hasattr(self, "_scheduler"):
-            self._scheduler = BackgroundScheduler(timezone="US/Eastern")
-        return self._scheduler
-
-    @property
+    @cached_property
     def stopped(self):
         """If `True` we're shutting down."""
-
-        if not hasattr(self, "_stopped"):
-            self._stopped = False
-        return self._stopped
-
-    @stopped.setter
-    def stopped(self, value):
-        """Allow the process to shut down so we can reboot the service."""
-        self._stopped = value
+        return False
 
     def __load_jobs(self):
         """Get the jobs from the DB and register them with the scheduler.
@@ -251,15 +232,12 @@ class Control:
             """Display name for the job."""
             return self.__row.name
 
-        @property
+        @cached_property
         def opts(self):
             """Parameter options passed to the job."""
+            return loads(self.__row.opts)
 
-            if not hasattr(self, "_opts"):
-                self._opts = loads(self.__row.opts)
-            return self._opts
-
-        @property
+        @cached_property
         def schedule(self):
             """Optional dictionary of cron-like scheduling values.
 
@@ -268,11 +246,9 @@ class Control:
             would run the job daily at 1:15 a.m.
             """
 
-            if not hasattr(self, "_schedule"):
-                self._schedule = self.__row.schedule
-                if self._schedule:
-                    self._schedule = loads(self._schedule)
-            return self._schedule
+            if not self.__row.schedule:
+                return self.__row.schedule
+            return loads(self.__row.schedule)
 
         def register(self):
             """Remember the job, if appropriate.
