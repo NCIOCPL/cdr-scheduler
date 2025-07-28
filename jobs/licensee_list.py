@@ -3,11 +3,11 @@ Program to create a list of active licensees (Production/Test)
 This job should run as a scheduled job once a month.
 """
 
-from .base_job import Job
 import datetime
 import requests
 import cdr
 from cdrapi import db
+from .base_job import Job
 
 
 class ReportTask(Job):
@@ -32,7 +32,6 @@ class Control:
     Class constants:
 
     TITLE           Name of the report
-    REPORTS         Full set of reports to be run by default (in order).
     SENDER          First argument to cdr.EmailMessage constructor.
     CHARSET         Encoding used by HTML page.
     TSTYLE          CSS formatting rules for table elements.
@@ -52,7 +51,6 @@ class Control:
     import lxml.html.builder as B
     import lxml.html as HTML
     TITLE = "List of PDQ Content Distribution Partners"
-    REPORT_DATE = datetime.date.today()
     MODES = "test", "live"
     SENDER = "PDQ Operator <NCIPDQoperator@mail.nih.gov>"
     CHARSET = "ascii"
@@ -121,6 +119,7 @@ class Control:
         """
 
         pstyle = "font-size: .9em; font-style: italic; font-family: Arial"
+        report_date = datetime.date.today()
         html = self.B.HTML(
             self.B.HEAD(
                 self.B.META(charset=self.CHARSET),
@@ -128,7 +127,7 @@ class Control:
             ),
             self.B.BODY(
                 self.B.H3(self.TITLE, style="font-family: Arial"),
-                self.B.P("Report date: %s" % self.REPORT_DATE, style=pstyle),
+                self.B.P(f"Report date: {report_date}", style=pstyle),
                 Partners(self).table()
             )
         )
@@ -268,6 +267,9 @@ class Partners:
         """
         Collect the Partner document objects.
         """
+
+        # Zero out the counts.
+        Partners.test_count = Partners.prod_count = 0
 
         # Fetch information about when each account last fetched data.
         url = ("https://cdr-dev.cancer.gov"

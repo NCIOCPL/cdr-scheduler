@@ -654,8 +654,7 @@ class Concept:
         try:
             synonyms = values.get("synonyms", [])
         except Exception as e:
-            stderr.write(f"\n{values}: {e}")
-            raise
+            raise Exception("concept failure: %r", values)
         for synonym in synonyms:
             if synonym.get("source") == "CTRP":
                 if synonym.get("termType") == "DN":
